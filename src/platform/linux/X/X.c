@@ -5,6 +5,7 @@
  */
 
 #include "X.h"
+#include <stdio.h>
 
 Display *dpy = NULL;
 
@@ -129,6 +130,7 @@ void x_scroll(int direction)
 		break;
 	}
 
+	printf("x_scroll %d\n", btn);
 	XTestFakeButtonEvent(dpy, btn, True, CurrentTime);
 	XTestFakeButtonEvent(dpy, btn, False, CurrentTime);
 }
@@ -168,10 +170,7 @@ Window create_window(const char *color)
 	return win;
 }
 
-void x_commit()
-{
-	XSync(dpy, False);
-}
+void x_commit() { XSync(dpy, False); }
 
 long x_get_mtime(const char *path)
 {
@@ -185,11 +184,12 @@ long x_get_mtime(const char *path)
 void x_monitor_file(const char *path)
 {
 	/*
-	 * OPT: We could use inotify, but that would reduce portability and involve
-	 * additional logic to handle renames. Polling is good enough.
+	 * OPT: We could use inotify, but that would reduce portability and
+	 * involve additional logic to handle renames. Polling is good enough.
 	 */
 	struct monitored_file *mf = &monitored_files[nr_monitored_files];
-	assert(nr_monitored_files < sizeof (monitored_files) / sizeof(monitored_files[0]));
+	assert(nr_monitored_files <
+	       sizeof(monitored_files) / sizeof(monitored_files[0]));
 
 	strncpy(mf->path, path, sizeof mf->path);
 	mf->mtime = x_get_mtime(path);

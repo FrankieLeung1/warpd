@@ -5,6 +5,7 @@
  */
 
 #include "warpd.h"
+#include <stdio.h>
 #include <time.h>
 
 /* constants */
@@ -68,10 +69,9 @@ static void tick()
 	const double dy = down - up;
 
 	const int maxx = sw - cursor_size;
-	const int maxy = sh - cursor_size/2;
-	const int miny = cursor_size/2;
+	const int maxy = sh - cursor_size / 2;
+	const int miny = cursor_size / 2;
 	const int minx = 1;
-
 
 	if (!dx && !dy) {
 		resting = 1;
@@ -80,7 +80,7 @@ static void tick()
 
 	if (resting) {
 		update_cursor_position();
-		if (!mode_slow){
+		if (!mode_slow) {
 			v = v0;
 		}
 		resting = 0;
@@ -111,10 +111,8 @@ static void tick()
  * Returns 1 if the cursor position was updated.
  */
 
-int mouse_process_key(struct input_event *ev,
-		      const char *up_key,
-		      const char *down_key,
-		      const char *left_key,
+int mouse_process_key(struct input_event *ev, const char *up_key,
+		      const char *down_key, const char *left_key,
 		      const char *right_key)
 {
 	int ret = 0;
@@ -151,6 +149,7 @@ int mouse_process_key(struct input_event *ev,
 		ret = 1;
 	}
 
+	printf("mousemove %d %d %d %d\n", left, right, up, down);
 	if (opnum && ret) {
 		const int x = right - left;
 		const int y = down - up;
@@ -176,10 +175,7 @@ int mouse_process_key(struct input_event *ev,
 	return ret;
 }
 
-void mouse_fast()
-{
-	a = a1;
-}
+void mouse_fast() { a = a1; }
 
 void mouse_normal()
 {

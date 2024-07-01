@@ -5,6 +5,7 @@
  */
 
 #include "warpd.h"
+#include <stdio.h>
 
 #ifdef __APPLE__
 #define factor 1
@@ -17,7 +18,9 @@
 /* terminal velocity */
 #define vt ((float)config_get_int("scroll_max_speed") / factor)
 #define v0 ((float)config_get_int("scroll_speed") / factor)
-#define da0 ((float)config_get_int("scroll_deceleration") / factor) /* deceleration */
+#define da0                                                                    \
+	((float)config_get_int("scroll_deceleration") /                        \
+	 factor) /* deceleration */
 #define a0 ((float)config_get_int("scroll_acceleration") / factor)
 
 static long last_tick = 0;
@@ -36,8 +39,10 @@ void scroll_tick()
 	int i;
 	/* Non zero to provide the illusion of continuous scrolling */
 
-	const float t = (float)(get_time_us()/1000 - last_tick); // time elapsed since last tick in ms
-	last_tick = get_time_us()/1000;
+	const float t =
+	    (float)(get_time_us() / 1000 -
+		    last_tick); // time elapsed since last tick in ms
+	last_tick = get_time_us() / 1000;
 
 	/* distance traveled since the last tick */
 	d += v * (t / 1000) + .5 * a * (t / 1000) * (t / 1000);
@@ -68,13 +73,11 @@ void scroll_stop()
 	d = 0;
 }
 
-void scroll_decelerate()
-{
-	a = da0;
-}
+void scroll_decelerate() { a = da0; }
 
 void scroll_accelerate(int _direction)
 {
+	printf("scroll_accelerate %d\n", _direction);
 	direction = _direction;
 	a = a0;
 
@@ -85,7 +88,4 @@ void scroll_accelerate(int _direction)
 	}
 }
 
-void scroll_impart_impulse()
-{
-	v += fling_velocity;
-}
+void scroll_impart_impulse() { v += fling_velocity; }
