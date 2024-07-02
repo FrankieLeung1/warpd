@@ -149,7 +149,7 @@ int mouse_process_key(struct input_event *ev, const char *up_key,
 		ret = 1;
 	}
 
-	printf("mousemove %d %d %d %d\n", left, right, up, down);
+	// printf("key mousemove %d %d %d %d\n", left, right, up, down);
 	if (opnum && ret) {
 		const int x = right - left;
 		const int y = down - up;

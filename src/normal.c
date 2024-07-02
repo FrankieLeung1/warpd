@@ -93,24 +93,28 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 
 	mouse_reset();
 	redraw(scr, mx, my, !show_cursor);
-	printf("start normal \n");
+	// printf("start normal \n");
 
 	uint64_t time = 0;
 	uint64_t last_blink_update = 0;
 	while (1) {
 		config_input_whitelist(keys, sizeof keys / sizeof keys[0]);
+		int was_start = 0;
 		if (start_ev == NULL) {
 			ev = platform->input_next_event(10);
 			time += 10;
 		} else {
 			ev = start_ev;
 			start_ev = NULL;
+			was_start = 1;
 		}
 
-		if (ev) {
-			printf("ev %s\n",
-			       platform->input_lookup_name(ev->code, 0));
-		}
+		/* if (ev) {
+			printf("ev %s %s %d\n",
+			       platform->input_lookup_name(ev->code, 0),
+			       ev->pressed ? "pressed" : "unpressed",
+			       was_start);
+		} */
 
 		platform->mouse_get_position(&scr, &mx, &my);
 
@@ -166,17 +170,17 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 			goto next;
 		}
 
-		if (config_input_match(ev, "top"))
+		if (config_input_match(ev, "top")) {
 			move(scr, mx, cursz / 2, !show_cursor);
-		else if (config_input_match(ev, "bottom"))
+		} else if (config_input_match(ev, "bottom")) {
 			move(scr, mx, sh - cursz / 2, !show_cursor);
-		else if (config_input_match(ev, "middle"))
+		} else if (config_input_match(ev, "middle")) {
 			move(scr, mx, sh / 2, !show_cursor);
-		else if (config_input_match(ev, "start"))
+		} else if (config_input_match(ev, "start")) {
 			move(scr, 1, my, !show_cursor);
-		else if (config_input_match(ev, "end"))
+		} else if (config_input_match(ev, "end")) {
 			move(scr, sw - cursz, my, !show_cursor);
-		else if (config_input_match(ev, "hist_back")) {
+		} else if (config_input_match(ev, "hist_back")) {
 			hist_add(mx, my);
 			hist_prev();
 			hist_get(&mx, &my);
@@ -260,6 +264,6 @@ exit:
 	platform->input_ungrab_keyboard();
 
 	platform->commit();
-	printf("end normal \n");
+	// printf("end normal \n");
 	return ev;
 }

@@ -330,18 +330,48 @@ uint8_t get_code_modifier(uint8_t code)
 /* returns 0 on timeout. */
 struct input_event *x_input_next_event(int timeout)
 {
+	// event to send return next
+	static int ev_queued = 0;
+	static struct input_event queued_ev;
+
+	// event to examine
+	static int ev_pending = 0;
+	static struct timeval pending_timeval;
+	static struct input_event pending_ev;
+
 	static struct input_event ev;
+
+	if (ev_queued) {
+		ev_queued = 0;
+		return &queued_ev;
+	}
 
 	struct timeval start, end;
 	gettimeofday(&start, NULL);
-	int elapsed = 0;
 
+	int elapsed = 0;
 	while (1) {
 		int state;
 		uint8_t code;
 		XEvent *xev;
 
-		xev = get_next_xev(timeout - elapsed);
+		if (ev_pending) {
+			struct timeval now;
+			gettimeofday(&now, NULL);
+			int diff =
+			    (now.tv_sec - pending_timeval.tv_sec) * 1000 +
+			    (now.tv_usec - pending_timeval.tv_usec) / 1000;
+
+			if (diff >= 70) {
+				// printf("pend timed out\n");
+				ev_pending = 0;
+				return &pending_ev;
+			}
+		}
+
+		// don't wait forever because we need to timeout pending_timeval
+		int t = timeout - elapsed > 0 ? timeout - elapsed : 35;
+		xev = get_next_xev(t);
 
 		if (xev) {
 			int xmods;
@@ -358,10 +388,44 @@ struct input_event *x_input_next_event(int timeout)
 					x_active_mods &=
 					    ~get_code_modifier(code);
 
+				if (ev_pending) {
+					ev_pending = 0;
+
+					if (ev.pressed &&
+					    ev.code == pending_ev.code &&
+					    ev.mods == pending_ev.mods) {
+						// skip both Pressed and
+						// Unpressed events
+						goto cont;
+					} else if (ev_queued) {
+						struct input_event temp =
+						    queued_ev;
+						queued_ev = ev;
+						ev = temp;
+					} else {
+						queued_ev = ev;
+						ev_queued = 1;
+						ev = pending_ev;
+					}
+					return &ev;
+				}
+
+				// NoMachine implements held buttons
+				// with quick Pressed and Unpressed
+				// events. Buffer Unpressed events incase
+				// an Pressed event comes afterwards
+				if (!ev.pressed) {
+					pending_ev = ev;
+					ev_pending = 1;
+					gettimeofday(&pending_timeval, NULL);
+					goto cont;
+				}
+
 				return &ev;
 			}
 		}
 
+	cont:
 		if (timeout) {
 			gettimeofday(&end, NULL);
 			elapsed = (end.tv_sec - start.tv_sec) * 1000 +
