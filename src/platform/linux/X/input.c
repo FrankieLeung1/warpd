@@ -10,6 +10,8 @@
 
 static int nr_grabbed_device_ids = 0;
 static int grabbed_device_ids[64];
+static int device_is_remote[256];
+static int last_event_is_remote = 0;
 
 uint8_t x_active_mods = 0;
 
@@ -22,9 +24,23 @@ static void reset_keyboard()
 	XQueryKeymap(dpy, keymap);
 
 	for (i = 0; i < 256; i++) {
-		if (0x01 & keymap[i / 8] >> (i % 8))
+		if (0x01 & keymap[i / 8] >> (i % 8)) {
+			// printf("reset_keyboard: releasing %d\n", (int)i);
 			XTestFakeKeyEvent(dpy, i, 0, CurrentTime);
+		}
 	}
+
+	// Explicitly release modifiers just in case
+	XTestFakeKeyEvent(dpy, XKeysymToKeycode(dpy, XK_Control_L), 0, CurrentTime);
+	XTestFakeKeyEvent(dpy, XKeysymToKeycode(dpy, XK_Control_R), 0, CurrentTime);
+	XTestFakeKeyEvent(dpy, XKeysymToKeycode(dpy, XK_Alt_L), 0, CurrentTime);
+	XTestFakeKeyEvent(dpy, XKeysymToKeycode(dpy, XK_Alt_R), 0, CurrentTime);
+	XTestFakeKeyEvent(dpy, XKeysymToKeycode(dpy, XK_Meta_L), 0, CurrentTime);
+	XTestFakeKeyEvent(dpy, XKeysymToKeycode(dpy, XK_Meta_R), 0, CurrentTime);
+	XTestFakeKeyEvent(dpy, XKeysymToKeycode(dpy, XK_Shift_L), 0, CurrentTime);
+	XTestFakeKeyEvent(dpy, XKeysymToKeycode(dpy, XK_Shift_R), 0, CurrentTime);
+	XTestFakeKeyEvent(dpy, XKeysymToKeycode(dpy, XK_Super_L), 0, CurrentTime);
+	XTestFakeKeyEvent(dpy, XKeysymToKeycode(dpy, XK_Super_R), 0, CurrentTime);
 
 	XSync(dpy, False);
 }
@@ -61,7 +77,6 @@ static XEvent *get_next_xev(int timeout)
 {
 	static int xfd = 0;
 	static XEvent ev;
-	char buf[1024];
 
 	if (XPending(dpy)) {
 		XNextEvent(dpy, &ev);
@@ -119,6 +134,8 @@ static uint8_t process_xinput_event(XEvent *ev, int *state, int *mods)
 		*state = (dev->flags & XIKeyRepeat) ? 2 : 1;
 		*mods = dev->mods.effective;
 
+		last_event_is_remote = device_is_remote[dev->deviceid % 256];
+
 		XFreeEventData(dpy, cookie);
 
 		return code;
@@ -128,6 +145,8 @@ static uint8_t process_xinput_event(XEvent *ev, int *state, int *mods)
 
 		*state = 0;
 		*mods = dev->mods.effective;
+
+		last_event_is_remote = device_is_remote[dev->deviceid % 256];
 
 		XFreeEventData(dpy, cookie);
 
@@ -229,12 +248,20 @@ void x_input_grab_keyboard()
 
 	devices = XIQueryDevice(dpy, XIAllDevices, &n);
 
+	memset(device_is_remote, 0, sizeof(device_is_remote));
+
 	for (i = 0; i < n; i++) {
 		if (devices[i].use == XISlaveKeyboard ||
 		    devices[i].use == XIFloatingSlave) {
+
+			int remote = strstr(devices[i].name, "NX Keyboard") ||
+				     strstr(devices[i].name, "Virtual core keyboard");
+
 			if (!strstr(devices[i].name, "XTEST pointer") &&
 			    devices[i].enabled) {
 				int id = devices[i].deviceid;
+
+				device_is_remote[id % 256] = remote;
 
 				grab(id);
 				grabbed_device_ids[nr_grabbed_device_ids++] =
@@ -379,7 +406,7 @@ struct input_event *x_input_next_event(int timeout)
 			if (code && state != 2) {
 				ev.pressed = state;
 				ev.code = code;
-				ev.mods = xmods_to_mods(xmods);
+				ev.mods = x_active_mods;
 
 				if (state)
 					x_active_mods |=
@@ -414,7 +441,7 @@ struct input_event *x_input_next_event(int timeout)
 				// with quick Pressed and Unpressed
 				// events. Buffer Unpressed events incase
 				// an Pressed event comes afterwards
-				if (!ev.pressed) {
+				if (!ev.pressed && last_event_is_remote) {
 					pending_ev = ev;
 					ev_pending = 1;
 					gettimeofday(&pending_timeval, NULL);
@@ -441,7 +468,7 @@ struct input_event *x_input_wait(struct input_event *events, size_t sz)
 {
 	size_t i;
 	static struct input_event ev;
-	struct input_evnet *ret = NULL;
+	struct input_event *ret = NULL;
 
 	for (i = 0; i < sz; i++) {
 		struct input_event *ev = &events[i];
@@ -467,6 +494,14 @@ struct input_event *x_input_wait(struct input_event *events, size_t sz)
 			ret = &ev;
 			goto exit;
 		} else {
+			int x, y;
+			x_mouse_get_position(NULL, &x, &y);
+			if (saved_scr && (x != 0 || y != 0)) {
+				x_mouse_move(saved_scr, saved_x, saved_y);
+				x_mouse_show();
+				saved_scr = NULL;
+			}
+
 			size_t i;
 			for (i = 0; i < nr_monitored_files; i++) {
 				long mtime =

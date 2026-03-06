@@ -1,10 +1,28 @@
 #include "warpd.h"
 
+int saved_x = -1;
+int saved_y = -1;
+screen_t saved_scr = NULL;
+
 int mode_loop(int initial_mode, int oneshot, int record_history)
 {
 	int mode = initial_mode;
 	int rc = 0;
 	struct input_event *ev = NULL;
+
+	if (saved_scr) {
+		int cx, cy;
+		platform->mouse_get_position(NULL, &cx, &cy);
+
+		if (cx != 0 || cy != 0) {
+			saved_x = cx;
+			saved_y = cy;
+		}
+
+		platform->mouse_move(saved_scr, saved_x, saved_y);
+		platform->mouse_show();
+		saved_scr = NULL;
+	}
 
 	while (1) {
 		int btn = 0;
@@ -84,6 +102,11 @@ int mode_loop(int initial_mode, int oneshot, int record_history)
 	}
 
 exit:
+	if (ev && config_input_match(ev, "exit")) {
+		platform->mouse_get_position(&saved_scr, &saved_x, &saved_y);
+		platform->mouse_move(saved_scr, 0, 0);
+		platform->mouse_hide();
+	}
 	return rc;
 }
 

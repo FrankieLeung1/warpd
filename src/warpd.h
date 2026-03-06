@@ -149,4 +149,9 @@ int mode_loop(int initial_mode, int oneshot, int record_history);
 void daemon_loop(const char *config_path);
 
 extern struct platform *platform;
+
+extern int saved_x;
+extern int saved_y;
+extern screen_t saved_scr;
+
 #endif

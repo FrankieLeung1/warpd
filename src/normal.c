@@ -63,7 +63,7 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 	screen_t scr;
 	int sh, sw;
 	int mx, my;
-	int dragging = 0;
+	static int dragging = 0;
 	int show_cursor = !system_cursor;
 
 	int n = sscanf(blink_interval, "%d %d", &on_time, &off_time);
@@ -258,6 +258,11 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 	}
 
 exit:
+	if (dragging && ev && config_input_match(ev, "exit")) {
+		platform->mouse_up(config_get_int("drag_button"));
+		dragging = 0;
+	}
+
 	platform->mouse_show();
 	platform->screen_clear(scr);
 
