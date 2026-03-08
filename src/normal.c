@@ -25,7 +25,7 @@ static void redraw(screen_t scr, int x, int y, int hide_cursor)
 
 	if (!hide_cursor)
 		platform->screen_draw_box(scr, x + 1, y - cursz / 2, cursz,
-					  cursz, curcol);
+					  cursz, dragging ? "#0000ff" : curcol);
 
 	if (!strcmp(indicator, "bottomleft"))
 		platform->screen_draw_box(scr, gap, sh - indicator_size - gap,
@@ -63,7 +63,6 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 	screen_t scr;
 	int sh, sw;
 	int mx, my;
-	static int dragging = 0;
 	int show_cursor = !system_cursor;
 
 	int n = sscanf(blink_interval, "%d %d", &on_time, &off_time);
@@ -199,8 +198,11 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 			else
 				platform->mouse_up(
 				    config_get_int("drag_button"));
+
+			redraw(scr, mx, my, !show_cursor);
 		} else if (config_input_match(ev, "copy_and_exit")) {
 			platform->mouse_up(config_get_int("drag_button"));
+			dragging = 0;
 			platform->copy_selection();
 			ev = NULL;
 			goto exit;

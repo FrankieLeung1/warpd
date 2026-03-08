@@ -135,7 +135,7 @@ static void print_version()
 }
 
 
-static int drag_flag = 0;
+int dragging = 0;
 static int oneshot_flag = 0;
 static int click_flag = 0;
 static int x_flag = -1;
@@ -156,12 +156,12 @@ int oneshot_main(struct platform *_platform)
 
 	platform->mouse_get_position(&scr, NULL, NULL);
 	if (x_flag == -1 && y_flag == -1) {
-		if (drag_flag)
+		if (dragging)
 			platform->mouse_down(config_get_int("drag_button"));
 
 		ret = mode_loop(mode, oneshot_flag, record_flag);
 
-		if (drag_flag)
+		if (dragging)
 			platform->mouse_up(config_get_int("drag_button"));
 
 	} else {
@@ -173,6 +173,7 @@ int oneshot_main(struct platform *_platform)
 
 	return ret;
 }
+
 
 int daemon_main(struct platform *_platform)
 {
@@ -290,7 +291,7 @@ int main(int argc, char *argv[])
 				record_flag = 1;
 				break;
 			case 267:
-				drag_flag = 1;
+				dragging = 1;
 				break;
 			case 260:
 				config_print_options();

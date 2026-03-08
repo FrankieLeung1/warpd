@@ -143,6 +143,8 @@ void config_print_options();
 
 uint64_t get_time_us();
 
+extern int dragging;
+
 extern struct config_entry *config;
 
 int mode_loop(int initial_mode, int oneshot, int record_history);

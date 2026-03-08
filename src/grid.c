@@ -72,7 +72,7 @@ static void redraw(int mx, int my, int force)
 	platform->screen_draw_box(scr,
 			x+gw/2-cursz/2, y+gh/2-cursz/2,
 			cursz, cursz,
-			config_get("cursor_color"));
+			dragging ? "#0000ff" : config_get("cursor_color"));
 
 	platform->commit();
 }
