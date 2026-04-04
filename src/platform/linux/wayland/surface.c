@@ -95,7 +95,7 @@ struct surface *create_surface(struct screen *scr, int x, int y, int w, int h, i
 
 	assert(sfc->wl_layer_surface);
 
-	zwlr_layer_surface_v1_set_size(sfc->wl_layer_surface, 10, 10);
+	zwlr_layer_surface_v1_set_size(sfc->wl_layer_surface, w, h);
 	zwlr_layer_surface_v1_set_anchor(sfc->wl_layer_surface, ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP|ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
 	zwlr_layer_surface_v1_set_margin(sfc->wl_layer_surface, y, 0, 0, x);
 	zwlr_layer_surface_v1_set_exclusive_zone(sfc->wl_layer_surface, -1);
