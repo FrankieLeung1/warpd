@@ -4,14 +4,54 @@
  * © 2019 Raheman Vaiya (see also: LICENSE).
  */
 #include "wayland.h"
+#include <dirent.h>
+#include <sys/ioctl.h>
+
+/*
+ * evdev definitions. We avoid including <linux/input.h> directly because it
+ * defines its own 'struct input_event' which collides with ours in platform.h.
+ */
+
+struct evdev_event {
+	struct timeval time;
+	unsigned short type;
+	unsigned short code;
+	int value;
+};
+
+#define EV_KEY 0x01
+#define EV_REL 0x02
+#define EV_ABS 0x03
+#define REL_X 0x00
+#define REL_Y 0x01
+#define REL_MAX 0x0f
+#define ABS_X 0x00
+#define ABS_Y 0x01
+#define ABS_MAX 0x3f
+#define EVIOCGRAB _IOW('E', 0x90, int)
+#define EVIOCGBIT(ev, len) _IOC(_IOC_READ, 'E', 0x20 + (ev), (len))
+#define EVIOCGNAME(len) _IOC(_IOC_READ, 'E', 0x06, (len))
+
+#define EV_MAX 0x1f
+#define KEY_MAX 0x2ff
+
+/* A few key codes for capability detection. */
+#define KEY_1 2
+#define KEY_EQUAL 13
+
+#define MAX_KEYBOARDS 32
 
 static struct input_event input_queue[32];
 static size_t input_queue_sz;
 
 static uint8_t x_active_mods = 0;
 
-static void noop() {}
 struct keymap_entry keymap[256] = {0};
+
+static int keyboard_fds[MAX_KEYBOARDS];
+static int nr_keyboards = 0;
+
+static void noop() {}
 
 static void update_mods(uint8_t code, uint8_t pressed)
 {
@@ -49,19 +89,11 @@ static void update_mods(uint8_t code, uint8_t pressed)
 	}
 }
 
-static void handle_key(void *data,
-		       struct wl_keyboard *wl_keyboard,
-		       uint32_t serial,
-		       uint32_t time, uint32_t code, uint32_t state)
-{
-	struct input_event *ev = &input_queue[input_queue_sz++];
-
-	update_mods(code, state);
-
-	ev->code = code;
-	ev->pressed = state;
-	ev->mods = x_active_mods;
-}
+/*
+ * We still use the wl_keyboard listener to receive the compositor's keymap,
+ * which may differ from system defaults (e.g. custom XKB settings in sway).
+ * Key events themselves come from evdev.
+ */
 
 static void handle_keymap(void *data,
 			  struct wl_keyboard *wl_keyboard,
@@ -105,107 +137,214 @@ static void handle_keymap(void *data,
 	xkb_state_unref(xkbstate);
 	xkb_keymap_unref(xkbmap);
 	xkb_context_unref(ctx);
-}
 
-static int input_grabbed = 0;
-static void handle_enter(void *data,
-			 struct wl_keyboard *wl_keyboard,
-			 uint32_t serial,
-			 struct wl_surface *surface,
-			 struct wl_array *keys)
-{
-	input_grabbed = 1;
+	munmap(buf, size);
+	close(fd);
 }
-
-static void handle_leave(void *data,
-			 struct wl_keyboard *wl_keyboard,
-			 uint32_t serial,
-			 struct wl_surface *surface)
-{
-	input_grabbed = 0;
-}
-
 
 static struct wl_keyboard_listener wl_keyboard_listener = {
-	.key = handle_key,
+	.key = noop,
 	.keymap = handle_keymap,
-	.enter = handle_enter,
-	.leave = handle_leave,
+	.enter = noop,
+	.leave = noop,
 	.modifiers = noop,
 	.repeat_info = noop,
 };
 
-static struct surface *input_surface = NULL;
+static int is_keyboard(int fd)
+{
+	unsigned long evbit[(EV_MAX / (8 * sizeof(long)) + 1)];
+	unsigned long keybit[(KEY_MAX / (8 * sizeof(long)) + 1)];
+	unsigned long relbit[(REL_MAX / (8 * sizeof(long)) + 1)];
+	unsigned long absbit[(ABS_MAX / (8 * sizeof(long)) + 1)];
+	int i, has_keys;
+
+	memset(evbit, 0, sizeof evbit);
+	memset(keybit, 0, sizeof keybit);
+	memset(relbit, 0, sizeof relbit);
+	memset(absbit, 0, sizeof absbit);
+
+	if (ioctl(fd, EVIOCGBIT(0, sizeof evbit), evbit) < 0)
+		return 0;
+
+	if (!(evbit[0] & (1UL << EV_KEY)))
+		return 0;
+
+	/* Ignore devices with relative X/Y axes (mice) */
+	if (evbit[0] & (1UL << EV_REL)) {
+		if (ioctl(fd, EVIOCGBIT(EV_REL, sizeof relbit), relbit) >= 0) {
+			if ((relbit[REL_X / (8 * sizeof(long))] & (1UL << (REL_X % (8 * sizeof(long))))) &&
+			    (relbit[REL_Y / (8 * sizeof(long))] & (1UL << (REL_Y % (8 * sizeof(long)))))) {
+				return 0;
+			}
+		}
+	}
+
+	/* Ignore devices with absolute X/Y axes (touchpads/joysticks) */
+	if (evbit[0] & (1UL << EV_ABS)) {
+		if (ioctl(fd, EVIOCGBIT(EV_ABS, sizeof absbit), absbit) >= 0) {
+			if ((absbit[ABS_X / (8 * sizeof(long))] & (1UL << (ABS_X % (8 * sizeof(long))))) &&
+			    (absbit[ABS_Y / (8 * sizeof(long))] & (1UL << (ABS_Y % (8 * sizeof(long)))))) {
+				return 0;
+			}
+		}
+	}
+
+	if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof keybit), keybit) < 0)
+		return 0;
+
+	/* Must have several typical keyboard keys (number row). */
+	has_keys = 0;
+	for (i = KEY_1; i <= KEY_EQUAL; i++) {
+		if (keybit[i / (8 * sizeof(long))] & (1UL << (i % (8 * sizeof(long)))))
+			has_keys++;
+	}
+
+	return has_keys >= 5;
+}
+
 /*
- * *Note*: Wayland does not allow for global input handlers.
- * Input events can only be captured by a focused window :(.
+ * Use evdev to grab keyboards at the kernel level. This is completely
+ * independent of Wayland focus, eliminating the need for the invisible
+ * surface hack and the suspend/resume dance for clicks and scrolls.
  */
+
 void way_input_grab_keyboard()
 {
-	input_surface = create_surface(&screens[0], -1, -1, 1, 1, 1, 0);
+	DIR *dir;
+	struct dirent *ent;
+	char path[256];
+	char name[256];
 
-	wl_display_flush(wl.dpy);
-	input_grabbed = 0;
-	while (!input_grabbed)
-		wl_display_dispatch(wl.dpy);
+	nr_keyboards = 0;
+
+	dir = opendir("/dev/input");
+	if (!dir) {
+		fprintf(stderr, "FATAL: Cannot open /dev/input\n");
+		exit(-1);
+	}
+
+	while ((ent = readdir(dir)) && nr_keyboards < MAX_KEYBOARDS) {
+		int fd;
+
+		if (strncmp(ent->d_name, "event", 5) != 0)
+			continue;
+
+		snprintf(path, sizeof path, "/dev/input/%s", ent->d_name);
+
+		fd = open(path, O_RDONLY | O_NONBLOCK);
+		if (fd < 0)
+			continue;
+
+		if (!is_keyboard(fd)) {
+			close(fd);
+			continue;
+		}
+
+		if (ioctl(fd, EVIOCGRAB, 1) < 0) {
+			name[0] = '\0';
+			ioctl(fd, EVIOCGNAME(sizeof name), name);
+			fprintf(stderr, "WARNING: Failed to grab %s (%s)\n", path, name);
+			close(fd);
+			continue;
+		}
+
+		keyboard_fds[nr_keyboards++] = fd;
+	}
+
+	closedir(dir);
+
+	if (nr_keyboards == 0) {
+		fprintf(stderr, "FATAL: No keyboards found to grab (check permissions on /dev/input/)\n");
+		exit(-1);
+	}
+
+	x_active_mods = 0;
 }
 
 void way_input_suspend_keyboard()
 {
-	if (input_surface) {
-		destroy_surface(input_surface);
-		input_surface = NULL;
-		wl_display_flush(wl.dpy);
-		wl_display_dispatch_pending(wl.dpy);
-	}
+	/* No-op: evdev grab is independent of Wayland surfaces. */
 }
 
 void way_input_resume_keyboard()
 {
-	if (!input_surface) {
-		input_surface = create_surface(&screens[0], -1, -1, 1, 1, 1, 0);
-		wl_display_flush(wl.dpy);
-		input_grabbed = 0;
-		while (!input_grabbed)
-			wl_display_dispatch(wl.dpy);
-	}
+	/* No-op: evdev grab is independent of Wayland surfaces. */
 }
-
 
 void way_input_ungrab_keyboard()
 {
-	destroy_surface(input_surface);
+	int i;
 
-	while (!input_grabbed)
-		wl_display_dispatch(wl.dpy);
-
-	input_surface = NULL;
+	for (i = 0; i < nr_keyboards; i++) {
+		ioctl(keyboard_fds[i], EVIOCGRAB, 0);
+		close(keyboard_fds[i]);
+	}
+	nr_keyboards = 0;
 }
-
 
 struct input_event *way_input_next_event(int timeout)
 {
 	static struct input_event ev;
-
-	struct pollfd pfds[] = {
-		{ .fd = wl_display_get_fd(wl.dpy), .events = POLLIN },
-	};
+	struct pollfd pfds[MAX_KEYBOARDS + 1];
+	int nfds, i;
 
 	while (1) {
-		wl_display_flush(wl.dpy);
-		wl_display_dispatch_pending(wl.dpy);
 		if (input_queue_sz) {
 			input_queue_sz--;
 			ev = input_queue[0];
-			memcpy(input_queue, input_queue+1, sizeof(struct input_event)*input_queue_sz);
-
+			memcpy(input_queue, input_queue + 1, sizeof(struct input_event) * input_queue_sz);
 			return &ev;
 		}
 
-		if (!poll(pfds, sizeof pfds / sizeof pfds[0], timeout ? timeout : -1))
+		nfds = 0;
+		for (i = 0; i < nr_keyboards; i++) {
+			pfds[nfds].fd = keyboard_fds[i];
+			pfds[nfds].events = POLLIN;
+			nfds++;
+		}
+
+		/* Also poll the Wayland fd to keep dispatching protocol events
+		 * (surface configure, etc.) while waiting for keyboard input. */
+		pfds[nfds].fd = wl_display_get_fd(wl.dpy);
+		pfds[nfds].events = POLLIN;
+		nfds++;
+
+		wl_display_flush(wl.dpy);
+		wl_display_dispatch_pending(wl.dpy);
+
+		if (!poll(pfds, nfds, timeout ? timeout : -1))
 			return NULL;
 
-		wl_display_dispatch(wl.dpy);
+		/* Dispatch any pending Wayland events. */
+		if (pfds[nr_keyboards].revents & POLLIN)
+			wl_display_dispatch(wl.dpy);
+
+		/* Read evdev events from all grabbed keyboards. */
+		for (i = 0; i < nr_keyboards; i++) {
+			struct evdev_event raw;
+
+			if (!(pfds[i].revents & POLLIN))
+				continue;
+
+			while (read(keyboard_fds[i], &raw, sizeof raw) == (ssize_t)sizeof raw) {
+				if (raw.type != EV_KEY)
+					continue;
+
+				/* value: 0=release, 1=press, 2=repeat */
+				if (raw.value == 2)
+					continue;
+
+				update_mods(raw.code, raw.value);
+
+				if (input_queue_sz < sizeof input_queue / sizeof input_queue[0]) {
+					struct input_event *qev = &input_queue[input_queue_sz++];
+					qev->code = raw.code;
+					qev->pressed = raw.value;
+					qev->mods = x_active_mods;
+				}
+			}
+		}
 	}
 }
 

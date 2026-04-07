@@ -358,8 +358,12 @@ static void screen_get_dimensions(screen_t scr, int *w, int *h)
 
 static void mouse_move(screen_t scr, int x, int y)
 {
-	int sx, sy;
+	if (x == -1 && y == -1) {
+		x = 0;
+		y = 0;
+	}
 
+	int sx, sy;
 	wn_screen_get_dimensions(scr, &sx, &sy, NULL, NULL);
 	SetCursorPos(sx + x, sy + y);
 }

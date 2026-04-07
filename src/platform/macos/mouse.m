@@ -166,6 +166,11 @@ void osx_mouse_get_position(struct screen **_scr, int *_x, int *_y)
 
 void osx_mouse_move(struct screen *scr, int x, int y)
 {
+	if (x == -1 && y == -1) {
+		x = 0;
+		y = 0;
+	}
+
 	const int type = dragging ? kCGEventLeftMouseDragged : kCGEventMouseMoved;
 	int cgx, cgy;
 

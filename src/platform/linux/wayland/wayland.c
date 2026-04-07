@@ -3,7 +3,11 @@
  *
  * © 2019 Raheman Vaiya (see also: LICENSE).
  */
+
+#include <stdio.h>
+#include <time.h>
 #include <limits.h>
+#include <signal.h>
 #include "wayland.h"
 
 #define UNIMPLEMENTED { \
@@ -11,6 +15,7 @@
 	exit(-1);							 \
 }
 
+static int is_hyprland = 0;
 static uint8_t btn_state[3] = {0};
 
 static struct {
@@ -76,24 +81,29 @@ void way_mouse_move(struct screen *scr, int x, int y)
 	int minx = INT_MAX;
 	int miny = INT_MAX;
 
-	ptr.x = x;
-	ptr.y = y;
-	ptr.scr = scr;
-
 	for (i = 0; i < nr_screens; i++) {
-		int x = screens[i].x + screens[i].w;
-		int y = screens[i].y + screens[i].h;
+		int ex = screens[i].x + screens[i].w;
+		int ey = screens[i].y + screens[i].h;
 
 		if (screens[i].y < miny)
 			miny = screens[i].y;
 		if (screens[i].x < minx)
 			minx = screens[i].x;
 
-		if (y > maxy)
-			maxy = y;
-		if (x > maxx)
-			maxx = x;
+		if (ey > maxy)
+			maxy = ey;
+		if (ex > maxx)
+			maxx = ex;
 	}
+
+	if (x == -1 && y == -1) {
+		x = maxx - minx - scr->x;
+		y = maxy - miny - scr->y;
+	}
+
+	ptr.x = x;
+	ptr.y = y;
+	ptr.scr = scr;
 
 	/*
 	 * Virtual pointer space always beings at 0,0, while global compositor
@@ -140,8 +150,6 @@ void way_mouse_click(int btn)
 {
 	normalize_btn(btn);
 
-	way_input_suspend_keyboard();
-
 	uint32_t t = 0;
 	zwlr_virtual_pointer_v1_button(wl.ptr, t, btn, WL_POINTER_BUTTON_STATE_PRESSED);
 	zwlr_virtual_pointer_v1_frame(wl.ptr);
@@ -149,8 +157,6 @@ void way_mouse_click(int btn)
 	zwlr_virtual_pointer_v1_frame(wl.ptr);
 
 	wl_display_flush(wl.dpy);
-
-	way_input_resume_keyboard();
 }
 
 void way_mouse_get_position(struct screen **scr, int *x, int *y)
@@ -161,26 +167,59 @@ void way_mouse_get_position(struct screen **scr, int *x, int *y)
 		*x = ptr.x;
 	if (y)
 		*y = ptr.y;
+
+	fprintf(stdout, "way_mouse_get_position %d %d\n", x ? *x : -1, y ? *y : -1);
 }
 
 void way_mouse_show()
 {
+	if (is_hyprland)
+		system("hyprctl keyword cursor:invisible false >/dev/null 2>&1");
 }
 
 void way_mouse_hide()
 {
-	fprintf(stderr, "wayland: mouse hiding not implemented\n");
+	if (is_hyprland)
+		system("hyprctl keyword cursor:invisible true >/dev/null 2>&1");
+	else
+		fprintf(stderr, "wayland: mouse hiding not implemented\n");
+}
+
+static uint32_t get_time_msec() {
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
 void way_scroll(int direction)
 {
-	//TODO: add horizontal scroll
-	direction = direction == SCROLL_DOWN ? 1 : -1;
+	int axis = 0;
+	int discrete = 0;
 
-	zwlr_virtual_pointer_v1_axis_discrete(wl.ptr, 0, 0,
-					      wl_fixed_from_int(15*direction),
-					      direction);
+	switch (direction) {
+	case SCROLL_DOWN:
+		axis = 0;
+		discrete = 1;
+		break;
+	case SCROLL_UP:
+		axis = 0;
+		discrete = -1;
+		break;
+	case SCROLL_RIGHT:
+		axis = 1;
+		discrete = 1;
+		break;
+	case SCROLL_LEFT:
+		axis = 1;
+		discrete = -1;
+		break;
+	default:
+		return;
+	}
 
+	uint32_t t = get_time_msec();
+	zwlr_virtual_pointer_v1_axis_source(wl.ptr, 0); // WL_POINTER_AXIS_SOURCE_WHEEL
+	zwlr_virtual_pointer_v1_axis_discrete(wl.ptr, t, axis, wl_fixed_from_int(15 * discrete), discrete);
 	zwlr_virtual_pointer_v1_frame(wl.ptr);
 
 	wl_display_flush(wl.dpy);
@@ -199,13 +238,12 @@ void way_screen_list(struct screen *scr[MAX_SCREENS], size_t *n)
 }
 
 void way_monitor_file(const char *path) { UNIMPLEMENTED }
-
-void way_commit()
-{
-}
+void way_commit() { }
 
 static void cleanup()
 {
+	way_mouse_show();
+
 	if (btn_state[0])
 		zwlr_virtual_pointer_v1_button(wl.ptr, 0, 272, 0);
 	if (btn_state[1])
@@ -215,14 +253,23 @@ static void cleanup()
 	wl_display_flush(wl.dpy);
 }
 
+static void sig_handler(int sig)
+{
+	cleanup();
+	exit(0);
+}
+
 void wayland_init(struct platform *platform)
 {
+	is_hyprland = getenv("HYPRLAND_INSTANCE_SIGNATURE") != NULL;
+
+	signal(SIGINT, sig_handler);
+	signal(SIGTERM, sig_handler);
+
 	way_init();
-
-	platform->monitor_file = way_monitor_file;
-
 	atexit(cleanup);
 
+	platform->monitor_file = way_monitor_file;
 	platform->commit = way_commit;
 	platform->copy_selection = way_copy_selection;
 	platform->hint_draw = way_hint_draw;

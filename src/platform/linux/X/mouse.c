@@ -55,7 +55,11 @@ void x_mouse_click(int btn)
 
 void x_mouse_move(struct screen *scr, int x, int y)
 {
-	// printf("mousemove %d %d\n", x, y);
+	if (x == -1 && y == -1) {
+		x = 0;
+		y = 0;
+	}
+
 	XTestFakeMotionEvent(dpy, DefaultScreen(dpy), scr->x + x, scr->y + y,
 			     0);
 
