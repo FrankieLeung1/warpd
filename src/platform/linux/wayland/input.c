@@ -32,12 +32,45 @@ struct evdev_event {
 #define EVIOCGBIT(ev, len) _IOC(_IOC_READ, 'E', 0x20 + (ev), (len))
 #define EVIOCGNAME(len) _IOC(_IOC_READ, 'E', 0x06, (len))
 
+#define EV_SYN 0x00
+#define SYN_REPORT 0x00
 #define EV_MAX 0x1f
 #define KEY_MAX 0x2ff
 
 /* A few key codes for capability detection. */
 #define KEY_1 2
 #define KEY_EQUAL 13
+
+/* Modifier keycodes (from linux/input-event-codes.h). */
+#define KEY_LEFTCTRL   29
+#define KEY_LEFTSHIFT  42
+#define KEY_RIGHTSHIFT 54
+#define KEY_LEFTALT    56
+#define KEY_LEFTMETA   125
+#define KEY_RIGHTCTRL  97
+#define KEY_RIGHTMETA  126
+#define KEY_RIGHTALT   100
+
+/* uinput definitions. */
+#define UINPUT_MAX_NAME_SIZE 80
+#define UI_DEV_CREATE  _IO('U', 1)
+#define UI_DEV_DESTROY _IO('U', 2)
+#define UI_SET_EVBIT   _IOW('U', 100, int)
+#define UI_SET_KEYBIT  _IOW('U', 101, int)
+
+struct uinput_setup {
+	struct input_id {
+		uint16_t bustype;
+		uint16_t vendor;
+		uint16_t product;
+		uint16_t version;
+	} id;
+	char name[UINPUT_MAX_NAME_SIZE];
+	uint32_t ff_effects_max;
+};
+
+#define UI_DEV_SETUP _IOW('U', 3, struct uinput_setup)
+#define BUS_VIRTUAL 0x06
 
 #define MAX_KEYBOARDS 32
 
@@ -209,6 +242,68 @@ static int is_keyboard(int fd)
  * surface hack and the suspend/resume dance for clicks and scrolls.
  */
 
+void way_input_release_mods(int fd)
+{
+	static const unsigned short mod_keys[] = {
+		KEY_LEFTCTRL, KEY_RIGHTCTRL,
+		KEY_LEFTSHIFT, KEY_RIGHTSHIFT,
+		KEY_LEFTALT, KEY_RIGHTALT,
+		KEY_LEFTMETA, KEY_RIGHTMETA,
+	};
+
+	int own_fd = 0;
+	size_t i;
+
+	if (fd < 0) {
+		struct uinput_setup setup;
+
+		fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
+		if (fd < 0) {
+			fprintf(stderr, "WARNING: cannot open /dev/uinput to release mods\n");
+			return;
+		}
+		own_fd = 1;
+
+		ioctl(fd, UI_SET_EVBIT, EV_KEY);
+		for (i = 0; i < sizeof mod_keys / sizeof mod_keys[0]; i++)
+			ioctl(fd, UI_SET_KEYBIT, mod_keys[i]);
+
+		memset(&setup, 0, sizeof setup);
+		snprintf(setup.name, sizeof setup.name, "warpd-mod-release");
+		setup.id.bustype = BUS_VIRTUAL;
+		setup.id.vendor = 0x1234;
+		setup.id.product = 0x5678;
+		ioctl(fd, UI_DEV_SETUP, &setup);
+		ioctl(fd, UI_DEV_CREATE);
+
+		/* Small delay for compositor to register the device. */
+		usleep(50000);
+	}
+
+	fprintf(stdout, "releasing mods fd:%d\n", fd);
+	for (i = 0; i < sizeof mod_keys / sizeof mod_keys[0]; i++) {
+		struct evdev_event ev = {0};
+		ev.type = EV_KEY;
+		ev.code = mod_keys[i];
+		ev.value = 0; /* release */
+		write(fd, &ev, sizeof ev);
+	}
+
+	/* SYN_REPORT to flush. */
+	{
+		struct evdev_event ev = {0};
+		ev.type = EV_SYN;
+		ev.code = SYN_REPORT;
+		ev.value = 0;
+		write(fd, &ev, sizeof ev);
+	}
+
+	if (own_fd) {
+		ioctl(fd, UI_DEV_DESTROY);
+		close(fd);
+	}
+}
+
 void way_input_grab_keyboard()
 {
 	DIR *dir;
@@ -249,6 +344,7 @@ void way_input_grab_keyboard()
 			continue;
 		}
 
+		way_input_release_mods(fd);
 		keyboard_fds[nr_keyboards++] = fd;
 	}
 
@@ -277,6 +373,7 @@ void way_input_ungrab_keyboard()
 	int i;
 
 	for (i = 0; i < nr_keyboards; i++) {
+		way_input_release_mods(keyboard_fds[i]);
 		ioctl(keyboard_fds[i], EVIOCGRAB, 0);
 		close(keyboard_fds[i]);
 	}

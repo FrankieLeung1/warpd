@@ -26,6 +26,7 @@
 #include "wl/virtual-pointer.h"
 #include "wl/layer-shell.h"
 #include "wl/xdg-output.h"
+#include "wl/hyprland-global-shortcuts-v1.h"
 
 
 #define MAX_BOXES 64
@@ -39,6 +40,7 @@ struct wl {
 	struct zwlr_virtual_pointer_v1 *ptr;
 	struct zwlr_layer_shell_v1 *layer_shell;
 	struct zxdg_output_manager_v1 *xdg_output_manager;
+	struct hyprland_global_shortcuts_manager_v1 *shortcuts_manager;
 };
 
 struct screen {
@@ -103,6 +105,7 @@ void surface_show(struct surface *sfc);
 
 /* Exported platform functions. */
 void way_run(void (*init)(void));
+void way_input_release_mods(int fd);
 void way_input_grab_keyboard();
 void way_input_ungrab_keyboard();
 void way_input_suspend_keyboard();
@@ -110,7 +113,7 @@ void way_input_resume_keyboard();
 struct input_event *way_input_next_event(int timeout);
 uint8_t way_input_lookup_code(const char *name, int *shifted);
 const char *way_input_lookup_name(uint8_t code, int shifted);
-struct input_event *way_input_wait(struct input_event *events, size_t sz);
+struct input_event *way_input_wait(struct input_event *events, const char *names[], size_t sz);
 void way_mouse_move(screen_t scr, int x, int y);
 void way_mouse_down(int btn);
 void way_mouse_up(int btn);

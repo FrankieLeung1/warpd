@@ -464,7 +464,7 @@ struct input_event *x_input_next_event(int timeout)
 	}
 }
 
-struct input_event *x_input_wait(struct input_event *events, size_t sz)
+struct input_event *x_input_wait(struct input_event *events, const char *names[], size_t sz)
 {
 	size_t i;
 	static struct input_event ev;

@@ -37,6 +37,7 @@ void daemon_loop(const char *config_path)
 	while (1) {
 		int mode = 0;
 		struct input_event *ev = platform->input_wait(activation_events,
+							     activation_keys,
 							     sizeof(activation_events) /
 							     sizeof(activation_events[0]));
 

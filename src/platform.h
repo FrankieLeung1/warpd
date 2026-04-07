@@ -59,7 +59,7 @@ struct platform {
 	 * grabbing the keyboard (including the event itself)
 	 * and returning the matched event.
 	 */
-	struct input_event *(*input_wait)(struct input_event *events, size_t sz);
+	struct input_event *(*input_wait)(struct input_event *events, const char *names[], size_t sz);
 
 	void (*mouse_move)(screen_t scr, int x, int y);
 	void (*mouse_down)(int btn);

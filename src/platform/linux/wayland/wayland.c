@@ -8,7 +8,11 @@
 #include <time.h>
 #include <limits.h>
 #include <signal.h>
+#include <sys/stat.h>
 #include "wayland.h"
+
+extern const char *input_event_tostr(struct input_event *ev);
+extern const char *config_get(const char *key);
 
 #define UNIMPLEMENTED { \
 	fprintf(stderr, "FATAL: wayland: %s unimplemented\n", __func__); \
@@ -168,7 +172,7 @@ void way_mouse_get_position(struct screen **scr, int *x, int *y)
 	if (y)
 		*y = ptr.y;
 
-	fprintf(stdout, "way_mouse_get_position %d %d\n", x ? *x : -1, y ? *y : -1);
+	// fprintf(stdout, "way_mouse_get_position %d %d\n", x ? *x : -1, y ? *y : -1);
 }
 
 void way_mouse_show()
@@ -226,7 +230,145 @@ void way_scroll(int direction)
 }
 
 void way_copy_selection() { UNIMPLEMENTED }
-struct input_event *way_input_wait(struct input_event *events, size_t sz) { UNIMPLEMENTED }
+
+/*
+ * Global shortcut state for daemon mode (Hyprland only).
+ *
+ * We register each activation key as a hyprland global shortcut.  The
+ * compositor fires pressed/released events which we convert back into
+ * struct input_event and return from way_input_wait().
+ */
+
+#define MAX_SHORTCUTS 16
+
+struct shortcut_entry {
+	struct hyprland_global_shortcut_v1 *shortcut;
+	struct input_event event;  /* the activation event we should return */
+	int pressed;               /* last pressed state from compositor */
+};
+
+static struct {
+	struct shortcut_entry entries[MAX_SHORTCUTS];
+	size_t n;
+	int triggered;             /* index of triggered shortcut, or -1 */
+} shortcuts;
+
+static void shortcut_pressed(void *data,
+			     struct hyprland_global_shortcut_v1 *shortcut,
+			     uint32_t tv_sec_hi, uint32_t tv_sec_lo,
+			     uint32_t tv_nsec)
+{
+	struct shortcut_entry *entry = data;
+	entry->pressed = 1;
+	shortcuts.triggered = entry - shortcuts.entries;
+}
+
+static void shortcut_released(void *data,
+			      struct hyprland_global_shortcut_v1 *shortcut,
+			      uint32_t tv_sec_hi, uint32_t tv_sec_lo,
+			      uint32_t tv_nsec)
+{
+	struct shortcut_entry *entry = data;
+	entry->pressed = 0;
+}
+
+static const struct hyprland_global_shortcut_v1_listener shortcut_listener = {
+	.pressed = shortcut_pressed,
+	.released = shortcut_released,
+};
+
+static const char *monitored_file;
+static time_t monitored_mtime;
+
+static time_t get_mtime(const char *path)
+{
+	struct stat st;
+	if (stat(path, &st) < 0)
+		return 0;
+	return st.st_mtime;
+}
+
+struct input_event *way_input_wait(struct input_event *events, const char *names[], size_t sz)
+{
+	static struct input_event result;
+	size_t i;
+
+	if (!is_hyprland || !wl.shortcuts_manager) {
+		fprintf(stderr,
+			"FATAL: wayland daemon mode requires Hyprland with "
+			"hyprland-global-shortcuts-v1 support.\n"
+			"On other compositors, bind keys in your compositor config to "
+			"run warpd --hint / --normal / --grid.\n");
+		exit(1);
+	}
+
+	/* Destroy previous shortcuts if any. */
+	for (i = 0; i < shortcuts.n; i++)
+		if (shortcuts.entries[i].shortcut)
+			hyprland_global_shortcut_v1_destroy(shortcuts.entries[i].shortcut);
+
+	memset(&shortcuts, 0, sizeof shortcuts);
+	shortcuts.triggered = -1;
+
+	/* Register a global shortcut for each activation event. */
+	for (i = 0; i < sz && i < MAX_SHORTCUTS; i++) {
+		struct shortcut_entry *entry = &shortcuts.entries[i];
+
+		entry->event = events[i];
+
+		entry->shortcut =
+			hyprland_global_shortcuts_manager_v1_register_shortcut(
+				wl.shortcuts_manager,
+				names[i], "warpd",
+				names[i],
+				config_get(names[i]));
+
+		hyprland_global_shortcut_v1_add_listener(
+			entry->shortcut, &shortcut_listener, entry);
+	}
+	shortcuts.n = i;
+
+	wl_display_flush(wl.dpy);
+
+	/* Record baseline mtime for monitored config file. */
+	if (monitored_file)
+		monitored_mtime = get_mtime(monitored_file);
+
+
+	fprintf(stdout, "warpd: waiting for global shortcuts\n");
+
+	/* Event loop: wait for a shortcut press or config file change. */
+	while (1) {
+		struct pollfd pfd;
+
+		pfd.fd = wl_display_get_fd(wl.dpy);
+		pfd.events = POLLIN;
+
+		wl_display_flush(wl.dpy);
+		wl_display_dispatch_pending(wl.dpy);
+
+		if (!poll(&pfd, 1, 500))  {
+			/* Timeout — check for config file changes. */
+			if (monitored_file &&
+			    get_mtime(monitored_file) != monitored_mtime)
+				return NULL;
+			continue;
+		}
+
+		if (pfd.revents & POLLIN)
+			wl_display_dispatch(wl.dpy);
+
+		if (shortcuts.triggered >= 0) {
+			int idx = shortcuts.triggered;
+			result = shortcuts.entries[idx].event;
+			result.pressed = 1;
+			shortcuts.triggered = -1;
+			fprintf(stdout, "warpd: shortcut triggered: %s (%s)\n",
+				names[idx], input_event_tostr(&result));
+			return &result;
+		}
+	}
+}
 
 void way_screen_list(struct screen *scr[MAX_SCREENS], size_t *n)
 {
@@ -237,7 +379,10 @@ void way_screen_list(struct screen *scr[MAX_SCREENS], size_t *n)
 	*n = nr_screens;
 }
 
-void way_monitor_file(const char *path) { UNIMPLEMENTED }
+void way_monitor_file(const char *path)
+{
+	monitored_file = path;
+}
 void way_commit() { }
 
 static void cleanup()

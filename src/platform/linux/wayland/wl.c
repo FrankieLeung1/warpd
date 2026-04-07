@@ -42,6 +42,10 @@ static void handle_global(void *data,
 	if (!strcmp(interface, "zwlr_layer_shell_v1"))
 		wl.layer_shell = wl_registry_bind(registry,
 						  name, &zwlr_layer_shell_v1_interface, 2);
+
+	if (!strcmp(interface, "hyprland_global_shortcuts_manager_v1"))
+		wl.shortcuts_manager = wl_registry_bind(registry,
+							name, &hyprland_global_shortcuts_manager_v1_interface, 1);
 }
 
 static struct wl_registry_listener registry_listener = {
