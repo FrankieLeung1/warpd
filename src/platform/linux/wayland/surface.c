@@ -23,6 +23,7 @@ struct surface {
 
 	int configured;
 	int destroyed;
+	int pointer_passthrough;
 };
 
 static void layer_surface_handle_configure(void *data, struct zwlr_layer_surface_v1
@@ -65,7 +66,7 @@ void destroy_surface(struct surface *sfc)
  * of displaying content on the screen (there is no show/hide) and should be considered a cheap operation
  * which operates on a persistent shared buffer (memory pool). */
 
-struct surface *create_surface(struct screen *scr, int x, int y, int w, int h, int capture_input)
+struct surface *create_surface(struct screen *scr, int x, int y, int w, int h, int capture_input, int passthrough)
 {
 	struct surface *sfc = calloc(1, sizeof (struct surface));
 
@@ -109,9 +110,19 @@ struct surface *create_surface(struct screen *scr, int x, int y, int w, int h, i
 								  ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE);
 	}
 
+	sfc->pointer_passthrough = passthrough;
+
 	wl_surface_commit(sfc->wl_surface);
 
 	return sfc;
+}
+
+void surface_set_pointer_passthrough(struct surface *sfc)
+{
+	struct wl_region *region = wl_compositor_create_region(wl.compositor);
+	wl_surface_set_input_region(sfc->wl_surface, region);
+	wl_region_destroy(region);
+	wl_surface_commit(sfc->wl_surface);
 }
 
 struct wl_surface *surface_get_wl_surface(struct surface *sfc)

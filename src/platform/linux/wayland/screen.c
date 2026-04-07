@@ -84,7 +84,7 @@ static void discover_pointer_location()
 
 	for (i = 0; i < nr_screens; i++) {
 		struct screen *scr = &screens[i];
-		scr->overlay = create_surface(scr, 0, 0, scr->w, scr->h, 0);
+		scr->overlay = create_surface(scr, 0, 0, scr->w, scr->h, 0, 0);
 	}
 
 	wl_display_flush(wl.dpy);
@@ -126,7 +126,7 @@ void way_screen_draw_box(struct screen *scr, int x, int y, int w, int h, const c
 	cairo_rectangle(scr->cr, x, y, w, h);
 	cairo_fill(scr->cr);
 
-	scr->boxes[scr->nr_boxes++] = create_surface(scr, x, y, w, h, 0);
+	scr->boxes[scr->nr_boxes++] = create_surface(scr, x, y, w, h, 0, 1);
 }
 
 

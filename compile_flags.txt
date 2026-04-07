@@ -1,0 +1,16 @@
+-Isrc
+-Isrc/platform/linux
+-Isrc/platform/linux/X
+-Isrc/platform/linux/wayland
+-I/usr/include/freetype2/
+-Wall
+-Wextra
+-pedantic
+-Wno-deprecated-declarations
+-Wno-unused-parameter
+-std=c99
+-D_DEFAULT_SOURCE
+-D_FORTIFY_SOURCE=2
+-DWARPD_WAYLAND=1
+-DWARPD_X=1
+-DVERSION="v1.3.5"

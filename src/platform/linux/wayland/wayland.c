@@ -122,6 +122,8 @@ void way_mouse_down(int btn)
 	btn_state[btn-1] = 1;
 	normalize_btn(btn);
 	zwlr_virtual_pointer_v1_button(wl.ptr, 0, btn, 1);
+	zwlr_virtual_pointer_v1_frame(wl.ptr);
+	wl_display_flush(wl.dpy);
 }
 
 void way_mouse_up(int btn)
@@ -130,17 +132,25 @@ void way_mouse_up(int btn)
 	btn_state[btn-1] = 0;
 	normalize_btn(btn);
 	zwlr_virtual_pointer_v1_button(wl.ptr, 0, btn, 0);
+	zwlr_virtual_pointer_v1_frame(wl.ptr);
+	wl_display_flush(wl.dpy);
 }
 
 void way_mouse_click(int btn)
 {
 	normalize_btn(btn);
 
-	zwlr_virtual_pointer_v1_button(wl.ptr, 0, btn, 1);
-	zwlr_virtual_pointer_v1_button(wl.ptr, 0, btn, 0);
+	way_input_suspend_keyboard();
+
+	uint32_t t = 0;
+	zwlr_virtual_pointer_v1_button(wl.ptr, t, btn, WL_POINTER_BUTTON_STATE_PRESSED);
+	zwlr_virtual_pointer_v1_frame(wl.ptr);
+	zwlr_virtual_pointer_v1_button(wl.ptr, t + 1, btn, WL_POINTER_BUTTON_STATE_RELEASED);
 	zwlr_virtual_pointer_v1_frame(wl.ptr);
 
 	wl_display_flush(wl.dpy);
+
+	way_input_resume_keyboard();
 }
 
 void way_mouse_get_position(struct screen **scr, int *x, int *y)
@@ -222,6 +232,8 @@ void wayland_init(struct platform *platform)
 	platform->input_lookup_name = way_input_lookup_name;
 	platform->input_next_event = way_input_next_event;
 	platform->input_ungrab_keyboard = way_input_ungrab_keyboard;
+	platform->input_suspend_keyboard = way_input_suspend_keyboard;
+	platform->input_resume_keyboard = way_input_resume_keyboard;
 	platform->input_wait = way_input_wait;
 	platform->mouse_click = way_mouse_click;
 	platform->mouse_down = way_mouse_down;

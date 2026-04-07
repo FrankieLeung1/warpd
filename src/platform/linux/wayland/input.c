@@ -142,13 +142,35 @@ static struct surface *input_surface = NULL;
  */
 void way_input_grab_keyboard()
 {
-	input_surface = create_surface(&screens[0], -1, -1, 1, 1, 1);
+	input_surface = create_surface(&screens[0], -1, -1, 1, 1, 1, 0);
 
 	wl_display_flush(wl.dpy);
 	input_grabbed = 0;
 	while (!input_grabbed)
 		wl_display_dispatch(wl.dpy);
 }
+
+void way_input_suspend_keyboard()
+{
+	if (input_surface) {
+		destroy_surface(input_surface);
+		input_surface = NULL;
+		wl_display_flush(wl.dpy);
+		wl_display_dispatch_pending(wl.dpy);
+	}
+}
+
+void way_input_resume_keyboard()
+{
+	if (!input_surface) {
+		input_surface = create_surface(&screens[0], -1, -1, 1, 1, 1, 0);
+		wl_display_flush(wl.dpy);
+		input_grabbed = 0;
+		while (!input_grabbed)
+			wl_display_dispatch(wl.dpy);
+	}
+}
+
 
 void way_input_ungrab_keyboard()
 {

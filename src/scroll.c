@@ -52,6 +52,9 @@ void scroll_tick()
 		v = 0;
 		d = 0;
 		traveled = 0;
+
+		if (platform->input_resume_keyboard)
+			platform->input_resume_keyboard();
 	}
 
 	if (v >= vt) {
@@ -67,6 +70,9 @@ void scroll_tick()
 
 void scroll_stop()
 {
+	if (v > 0 && platform->input_resume_keyboard)
+		platform->input_resume_keyboard();
+
 	v = 0;
 	a = 0;
 	traveled = 0;
@@ -77,7 +83,6 @@ void scroll_decelerate() { a = da0; }
 
 void scroll_accelerate(int _direction)
 {
-	printf("scroll_accelerate %d\n", _direction);
 	direction = _direction;
 	a = a0;
 
@@ -85,6 +90,9 @@ void scroll_accelerate(int _direction)
 		d = 0;
 		traveled = 0;
 		v = v0;
+
+		if (platform->input_suspend_keyboard)
+			platform->input_suspend_keyboard();
 	}
 }
 

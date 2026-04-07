@@ -109,10 +109,10 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 		}
 
 		/* if (ev) {
-			printf("ev %s %s %d\n",
-			       platform->input_lookup_name(ev->code, 0),
-			       ev->pressed ? "pressed" : "unpressed",
-			       was_start);
+		        printf("ev %s %s %d\n",
+		                platform->input_lookup_name(ev->code, 0),
+		                ev->pressed ? "pressed" : "unpressed",
+		                was_start);
 		} */
 
 		platform->mouse_get_position(&scr, &mx, &my);

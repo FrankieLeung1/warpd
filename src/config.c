@@ -181,6 +181,7 @@ static void config_add(const char *key, const char *val)
 	strcpy(ent->value, val);
 
 	ent->type = get_option_type(key);
+
 	if (!ent->type) {
 		free(ent);
 		return;
@@ -195,6 +196,7 @@ static void config_add(const char *key, const char *val)
 					fprintf(stderr, "ERROR: %s must be a valid int\n", ent->value);
 					exit(-1);
 				}
+
 			break;
 		case OPT_BUTTON:
 		case OPT_KEY:
@@ -204,11 +206,9 @@ static void config_add(const char *key, const char *val)
 
 		default:
 			break;
-
 	}
 
 	ent->next = config;
-
 	config = ent;
 }
 
@@ -331,9 +331,13 @@ int config_input_match(struct input_event *ev, const char *config_key)
 		if (ent->whitelisted && (idx = keyidx(ent->value, ev, &exact))) {
 			if ((ent->type == OPT_KEY && exact) || ent->type == OPT_BUTTON) {
 				if (!strcmp(ent->key, config_key))
+				{
 					return idx;
+				}
 				else
+				{
 					return 0;
+				}
 			}
 		}
 	}

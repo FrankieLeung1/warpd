@@ -47,6 +47,8 @@ struct platform {
 
 	void (*input_grab_keyboard)();
 	void (*input_ungrab_keyboard)();
+	void (*input_suspend_keyboard)();
+	void (*input_resume_keyboard)();
 
 	struct input_event *(*input_next_event)(int timeout);
 	uint8_t (*input_lookup_code)(const char *name, int *shifted);
