@@ -334,8 +334,16 @@ static uint8_t input_lookup_code(const char *name, int *shifted)
 	return 0;
 }
 
+static int invalidated = 0;
+
 static void mouse_get_position(screen_t *_scr, int *x, int *y)
 {
+	if (invalidated) {
+		if (x) *x = -1;
+		if (y) *y = -1;
+		return;
+	}
+
 	int sx, sy;
 
 	POINT p;
@@ -359,8 +367,11 @@ static void screen_get_dimensions(screen_t scr, int *w, int *h)
 static void mouse_move(screen_t scr, int x, int y)
 {
 	if (x == -1 && y == -1) {
+		invalidated = 1;
 		x = 0;
 		y = 0;
+	} else {
+		invalidated = 0;
 	}
 
 	int sx, sy;

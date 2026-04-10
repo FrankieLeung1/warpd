@@ -39,7 +39,7 @@ static struct {
 	{"backspace", "BackSpace"},
 };
 
-struct ptr ptr = {0};
+struct ptr ptr = {-1, -1, NULL};
 
 /* Input */
 
@@ -106,11 +106,16 @@ void way_mouse_move(struct screen *scr, int x, int y)
 	if (x == -1 && y == -1) {
 		x = maxx - minx - scr->x;
 		y = maxy - miny - scr->y;
-	}
 
-	ptr.x = x;
-	ptr.y = y;
-	ptr.scr = scr;
+		ptr.x = -1;
+		ptr.y = -1;
+		ptr.scr = scr;
+	} else {
+		ptr.x = x;
+		ptr.y = y;
+		ptr.scr = scr;
+	}
+	// printf("xy %d %d\n", ptr.x, ptr.y);
 
 	/*
 	 * Virtual pointer space always beings at 0,0, while global compositor

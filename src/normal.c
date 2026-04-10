@@ -98,21 +98,18 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 	uint64_t last_blink_update = 0;
 	while (1) {
 		config_input_whitelist(keys, sizeof keys / sizeof keys[0]);
-		int was_start = 0;
 		if (start_ev == NULL) {
 			ev = platform->input_next_event(10);
 			time += 10;
 		} else {
 			ev = start_ev;
 			start_ev = NULL;
-			was_start = 1;
 		}
 
 		/* if (ev) {
-		        printf("ev %s %s %d\n",
+		        printf("ev %s %s\n",
 		                platform->input_lookup_name(ev->code, 0),
-		                ev->pressed ? "pressed" : "unpressed",
-		                was_start);
+		                ev->pressed ? "pressed" : "unpressed");
 		} */
 
 		platform->mouse_get_position(&scr, &mx, &my);

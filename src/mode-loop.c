@@ -14,7 +14,7 @@ int mode_loop(int initial_mode, int oneshot, int record_history)
 		int cx, cy;
 		platform->mouse_get_position(NULL, &cx, &cy);
 
-		if (cx != 0 || cy != 0) {
+		if (cx != -1 || cy != -1) {
 			saved_x = cx;
 			saved_y = cy;
 		}

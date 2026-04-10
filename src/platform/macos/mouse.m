@@ -9,6 +9,7 @@
 static NSTimer *hider_timer = NULL;
 static int hide_depth = 0;
 static int dragging = 0;
+static int invalidated = 0;
 
 @interface CursorHider : NSObject
 @end
@@ -132,6 +133,12 @@ void osx_mouse_down(int btn)
 
 void osx_mouse_get_position(struct screen **_scr, int *_x, int *_y)
 {
+	if (invalidated) {
+		if (_x) *_x = -1;
+		if (_y) *_y = -1;
+		return;
+	}
+
 	size_t i;
 	NSPoint loc = [NSEvent mouseLocation];
 	int x = loc.x;
@@ -167,8 +174,11 @@ void osx_mouse_get_position(struct screen **_scr, int *_x, int *_y)
 void osx_mouse_move(struct screen *scr, int x, int y)
 {
 	if (x == -1 && y == -1) {
+		invalidated = 1;
 		x = 0;
 		y = 0;
+	} else {
+		invalidated = 0;
 	}
 
 	const int type = dragging ? kCGEventLeftMouseDragged : kCGEventMouseMoved;

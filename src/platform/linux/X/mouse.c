@@ -2,6 +2,7 @@
 #include <stdio.h>
 
 static int hidden = 0;
+static int invalidated = 0;
 
 void x_mouse_up(int btn)
 {
@@ -56,8 +57,11 @@ void x_mouse_click(int btn)
 void x_mouse_move(struct screen *scr, int x, int y)
 {
 	if (x == -1 && y == -1) {
+		invalidated = 1;
 		x = 0;
 		y = 0;
+	} else {
+		invalidated = 0;
 	}
 
 	XTestFakeMotionEvent(dpy, DefaultScreen(dpy), scr->x + x, scr->y + y,
@@ -73,6 +77,12 @@ void x_mouse_get_position(struct screen **_scr, int *_x, int *_y)
 	int _;
 	unsigned int _u;
 	int x, y;
+
+	if (invalidated) {
+		if (_x) *_x = -1;
+		if (_y) *_y = -1;
+		return;
+	}
 
 	/* Obtain absolute pointer coordinates */
 	XQueryPointer(dpy, DefaultRootWindow(dpy), &root, &chld, &x, &y, &_, &_,
