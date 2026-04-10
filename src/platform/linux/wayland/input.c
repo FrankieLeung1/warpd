@@ -476,8 +476,6 @@ void init_input()
 	wl_keyboard_add_listener(wl_seat_get_keyboard(wl.seat), &wl_keyboard_listener, NULL);
 }
 
-#define MAX_MICE 16
-
 static int mouse_fds[MAX_MICE];
 static int nr_mice = 0;
 
@@ -522,6 +520,15 @@ void way_input_close_mice()
 	for (i = 0; i < nr_mice; i++)
 		close(mouse_fds[i]);
 	nr_mice = 0;
+}
+
+int way_input_get_mouse_fds(int *fds)
+{
+	int i;
+	for (i = 0; i < nr_mice; i++)
+		fds[i] = mouse_fds[i];
+
+	return nr_mice;
 }
 
 int way_input_poll_mice(int timeout)

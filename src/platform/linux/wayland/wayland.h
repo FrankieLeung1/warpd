@@ -30,6 +30,7 @@
 
 
 #define MAX_BOXES 64
+#define MAX_MICE 16
 
 struct wl {
 	struct wl_display *dpy;
@@ -116,6 +117,7 @@ const char *way_input_lookup_name(uint8_t code, int shifted);
 struct input_event *way_input_wait(struct input_event *events, const char *names[], size_t sz);
 void way_input_open_mice();
 void way_input_close_mice();
+int way_input_get_mouse_fds(int *fds);
 int way_input_poll_mice(int timeout);
 void way_mouse_move(screen_t scr, int x, int y);
 void way_mouse_down(int btn);

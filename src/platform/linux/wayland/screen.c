@@ -204,7 +204,6 @@ void init_screen()
 	size_t i;
 
 	for (i = 0; i < nr_screens; i++) {
-		struct surface *sfc;
 		struct screen *scr = &screens[i];
 
 		scr->xdg_output =

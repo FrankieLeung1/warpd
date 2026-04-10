@@ -173,14 +173,37 @@ void way_mouse_click(int btn)
 
 void way_mouse_get_position(struct screen **scr, int *x, int *y)
 {
+	if (is_hyprland) {
+		FILE *fp = popen("hyprctl cursorpos", "r");
+		if (fp) {
+			int gx, gy;
+			if (fscanf(fp, "%d, %d", &gx, &gy) == 2) {
+				size_t i;
+				for (i = 0; i < nr_screens; i++) {
+					struct screen *s = &screens[i];
+					if (gx >= s->x && gx < s->x + s->w &&
+					    gy >= s->y && gy < s->y + s->h) {
+						if (scr)
+							*scr = s;
+						if (x)
+							*x = gx - s->x;
+						if (y)
+							*y = gy - s->y;
+						pclose(fp);
+						return;
+					}
+				}
+			}
+			pclose(fp);
+		}
+	}
+
 	if (scr)
 		*scr = ptr.scr;
 	if (x)
 		*x = ptr.x;
 	if (y)
 		*y = ptr.y;
-
-	// fprintf(stdout, "way_mouse_get_position %d %d\n", x ? *x : -1, y ? *y : -1);
 }
 
 void way_mouse_show()
@@ -349,15 +372,33 @@ struct input_event *way_input_wait(struct input_event *events, const char *names
 
 	/* Event loop: wait for a shortcut press or config file change. */
 	while (1) {
-		struct pollfd pfd;
+		struct pollfd pfds[1 + MAX_MICE];
+		int mouse_fds[MAX_MICE];
+		int nr_mouse_fds = 0;
+		int nfds = 0;
 
-		pfd.fd = wl_display_get_fd(wl.dpy);
-		pfd.events = POLLIN;
+		pfds[0].fd = wl_display_get_fd(wl.dpy);
+		pfds[0].events = POLLIN;
+		nfds = 1;
+
+		/*
+		 * If the cursor was hidden (saved_scr set), include
+		 * mouse fds in poll so physical movement wakes us
+		 * immediately regardless of the timeout.
+		 */
+		if (saved_scr) {
+			nr_mouse_fds = way_input_get_mouse_fds(mouse_fds);
+			for (int i = 0; i < nr_mouse_fds; i++) {
+				pfds[nfds].fd = mouse_fds[i];
+				pfds[nfds].events = POLLIN;
+				nfds++;
+			}
+		}
 
 		wl_display_flush(wl.dpy);
 		wl_display_dispatch_pending(wl.dpy);
 
-		if (!poll(&pfd, 1, 500))  {
+		if (!poll(pfds, nfds, 500))  {
 			/* Timeout — check for config file changes. */
 			if (monitored_file &&
 			    get_mtime(monitored_file) != monitored_mtime) {
@@ -365,21 +406,21 @@ struct input_event *way_input_wait(struct input_event *events, const char *names
 				return NULL;
 			}
 
-			/*
-			 * If the cursor was hidden (saved_scr set), check for
-			 * physical mouse movement via evdev.  Restore and show
-			 * the cursor when the user moves their mouse.
-			 */
-			if (saved_scr && way_input_poll_mice(0)) {
-				way_mouse_move(saved_scr, saved_x, saved_y);
-				way_mouse_show();
-				saved_scr = NULL;
-			}
-
 			continue;
 		}
 
-		if (pfd.revents & POLLIN)
+		/*
+		 * Check for physical mouse movement via evdev.
+		 * Restore and show the cursor when the user moves
+		 * their mouse.
+		 */
+		if (saved_scr && way_input_poll_mice(0)) {
+			way_mouse_move(saved_scr, saved_x, saved_y);
+			way_mouse_show();
+			saved_scr = NULL;
+		}
+
+		if (pfds[0].revents & POLLIN)
 			wl_display_dispatch(wl.dpy);
 
 		if (shortcuts.triggered >= 0) {
