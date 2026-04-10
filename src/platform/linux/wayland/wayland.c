@@ -13,6 +13,9 @@
 
 extern const char *input_event_tostr(struct input_event *ev);
 extern const char *config_get(const char *key);
+extern int saved_x;
+extern int saved_y;
+extern screen_t saved_scr;
 
 #define UNIMPLEMENTED { \
 	fprintf(stderr, "FATAL: wayland: %s unimplemented\n", __func__); \
@@ -337,6 +340,8 @@ struct input_event *way_input_wait(struct input_event *events, const char *names
 
 	fprintf(stdout, "warpd: waiting for global shortcuts\n");
 
+	way_input_open_mice();
+
 	/* Event loop: wait for a shortcut press or config file change. */
 	while (1) {
 		struct pollfd pfd;
@@ -350,8 +355,22 @@ struct input_event *way_input_wait(struct input_event *events, const char *names
 		if (!poll(&pfd, 1, 500))  {
 			/* Timeout — check for config file changes. */
 			if (monitored_file &&
-			    get_mtime(monitored_file) != monitored_mtime)
+			    get_mtime(monitored_file) != monitored_mtime) {
+				way_input_close_mice();
 				return NULL;
+			}
+
+			/*
+			 * If the cursor was hidden (saved_scr set), check for
+			 * physical mouse movement via evdev.  Restore and show
+			 * the cursor when the user moves their mouse.
+			 */
+			if (saved_scr && way_input_poll_mice(0)) {
+				way_mouse_move(saved_scr, saved_x, saved_y);
+				way_mouse_show();
+				saved_scr = NULL;
+			}
+
 			continue;
 		}
 
@@ -365,6 +384,7 @@ struct input_event *way_input_wait(struct input_event *events, const char *names
 			shortcuts.triggered = -1;
 			fprintf(stdout, "warpd: shortcut triggered: %s (%s)\n",
 				names[idx], input_event_tostr(&result));
+			way_input_close_mice();
 			return &result;
 		}
 	}

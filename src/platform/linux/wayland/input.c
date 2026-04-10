@@ -184,6 +184,27 @@ static struct wl_keyboard_listener wl_keyboard_listener = {
 	.repeat_info = noop,
 };
 
+static int is_mouse(int fd)
+{
+	unsigned long evbit[(EV_MAX / (8 * sizeof(long)) + 1)];
+	unsigned long relbit[(REL_MAX / (8 * sizeof(long)) + 1)];
+
+	memset(evbit, 0, sizeof evbit);
+	memset(relbit, 0, sizeof relbit);
+
+	if (ioctl(fd, EVIOCGBIT(0, sizeof evbit), evbit) < 0)
+		return 0;
+
+	if (!(evbit[0] & (1UL << EV_REL)))
+		return 0;
+
+	if (ioctl(fd, EVIOCGBIT(EV_REL, sizeof relbit), relbit) < 0)
+		return 0;
+
+	return (relbit[REL_X / (8 * sizeof(long))] & (1UL << (REL_X % (8 * sizeof(long))))) &&
+	       (relbit[REL_Y / (8 * sizeof(long))] & (1UL << (REL_Y % (8 * sizeof(long)))));
+}
+
 static int is_keyboard(int fd)
 {
 	unsigned long evbit[(EV_MAX / (8 * sizeof(long)) + 1)];
@@ -453,4 +474,83 @@ struct input_event *way_input_next_event(int timeout)
 void init_input()
 {
 	wl_keyboard_add_listener(wl_seat_get_keyboard(wl.seat), &wl_keyboard_listener, NULL);
+}
+
+#define MAX_MICE 16
+
+static int mouse_fds[MAX_MICE];
+static int nr_mice = 0;
+
+void way_input_open_mice()
+{
+	DIR *dir;
+	struct dirent *ent;
+	char path[256];
+
+	nr_mice = 0;
+
+	dir = opendir("/dev/input");
+	if (!dir)
+		return;
+
+	while ((ent = readdir(dir)) && nr_mice < MAX_MICE) {
+		int fd;
+
+		if (strncmp(ent->d_name, "event", 5) != 0)
+			continue;
+
+		snprintf(path, sizeof path, "/dev/input/%s", ent->d_name);
+
+		fd = open(path, O_RDONLY | O_NONBLOCK);
+		if (fd < 0)
+			continue;
+
+		if (!is_mouse(fd)) {
+			close(fd);
+			continue;
+		}
+
+		mouse_fds[nr_mice++] = fd;
+	}
+
+	closedir(dir);
+}
+
+void way_input_close_mice()
+{
+	int i;
+	for (i = 0; i < nr_mice; i++)
+		close(mouse_fds[i]);
+	nr_mice = 0;
+}
+
+int way_input_poll_mice(int timeout)
+{
+	struct pollfd pfds[MAX_MICE];
+	int i;
+
+	if (!nr_mice)
+		return 0;
+
+	for (i = 0; i < nr_mice; i++) {
+		pfds[i].fd = mouse_fds[i];
+		pfds[i].events = POLLIN;
+	}
+
+	if (poll(pfds, nr_mice, timeout) <= 0)
+		return 0;
+
+	for (i = 0; i < nr_mice; i++) {
+		if (!(pfds[i].revents & POLLIN))
+			continue;
+
+		struct evdev_event raw;
+		while (read(mouse_fds[i], &raw, sizeof raw) == (ssize_t)sizeof raw) {
+			if (raw.type == EV_REL &&
+			    (raw.code == REL_X || raw.code == REL_Y))
+				return 1;
+		}
+	}
+
+	return 0;
 }
