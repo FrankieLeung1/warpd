@@ -1,0 +1,16 @@
+{
+    "C_Cpp.clang_format_path": "/usr/bin/clang-format",
+    "editor.formatOnSave": true,
+    "files.associations": {
+        "*.h": "c",
+        "*.c": "c"
+    },
+    "C_Cpp.errorSquiggles": "enabled",
+    "C_Cpp.default.compilerPath": "/usr/bin/clang++",
+    "C_Cpp.default.cStandard": "c99",
+    "debug.inlineValues": "on",
+    "workbench.colorCustomizations": {
+        "editor.inlineValuesBackground": "#00000000",
+        "editor.inlineValuesForeground": "#808080"
+    }
+}

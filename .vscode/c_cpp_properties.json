@@ -1,0 +1,33 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "src",
+                "src/platform/linux",
+                "src/platform/linux/X",
+                "src/platform/linux/wayland",
+                "/usr/include/freetype2"
+            ],
+            "defines": [
+                "WARPD_WAYLAND=1",
+                "WARPD_X=1",
+                "VERSION=\"v1.3.5\"",
+                "_DEFAULT_SOURCE",
+                "_FORTIFY_SOURCE=2"
+            ],
+            "compilerPath": "/usr/bin/clang++",
+            "cStandard": "c99",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-gcc-x64",
+            "browse": {
+                "path": [
+                    "${workspaceFolder}/src"
+                ],
+                "limitSymbolsToIncludedHeaders": true
+            }
+        }
+    ],
+    "version": 4
+}
