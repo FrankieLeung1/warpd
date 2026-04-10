@@ -280,7 +280,6 @@ void way_input_release_mods(int fd)
 		usleep(50000);
 	}
 
-	fprintf(stdout, "releasing mods fd:%d\n", fd);
 	for (i = 0; i < sizeof mod_keys / sizeof mod_keys[0]; i++) {
 		struct evdev_event ev = {0};
 		ev.type = EV_KEY;
@@ -327,7 +326,9 @@ void way_input_grab_keyboard()
 
 		snprintf(path, sizeof path, "/dev/input/%s", ent->d_name);
 
-		fd = open(path, O_RDONLY | O_NONBLOCK);
+		fd = open(path, O_RDWR | O_NONBLOCK);
+		if (fd < 0)
+			fd = open(path, O_RDONLY | O_NONBLOCK);
 		if (fd < 0)
 			continue;
 
@@ -335,6 +336,12 @@ void way_input_grab_keyboard()
 			close(fd);
 			continue;
 		}
+
+		/*
+		 * Inject mod release events BEFORE grabbing so the
+		 * compositor still sees them on this physical device.
+		 */
+		way_input_release_mods(fd);
 
 		if (ioctl(fd, EVIOCGRAB, 1) < 0) {
 			name[0] = '\0';
@@ -344,7 +351,6 @@ void way_input_grab_keyboard()
 			continue;
 		}
 
-		way_input_release_mods(fd);
 		keyboard_fds[nr_keyboards++] = fd;
 	}
 
@@ -373,7 +379,6 @@ void way_input_ungrab_keyboard()
 	int i;
 
 	for (i = 0; i < nr_keyboards; i++) {
-		way_input_release_mods(keyboard_fds[i]);
 		ioctl(keyboard_fds[i], EVIOCGRAB, 0);
 		close(keyboard_fds[i]);
 	}

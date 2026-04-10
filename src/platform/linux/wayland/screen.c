@@ -79,6 +79,9 @@ static struct wl_pointer_listener wl_pointer_listener = {
 static void discover_pointer_location()
 {
 	size_t i;
+	int attempts = 0;
+	int wl_fd;
+	struct pollfd pfd;
 
 	wl_pointer_add_listener(wl_seat_get_pointer(wl.seat), &wl_pointer_listener, NULL);
 
@@ -87,8 +90,9 @@ static void discover_pointer_location()
 		scr->overlay = create_surface(scr, 0, 0, scr->w, scr->h, 0, 0);
 	}
 
-	wl_display_flush(wl.dpy);
-	while (!ptr.scr) {
+	wl_fd = wl_display_get_fd(wl.dpy);
+
+	while (!ptr.scr && attempts < 10) {
 		/*
 		 * Agitate the pointer to precipitate an entry
 		 * event. Hyprland appears to require this for
@@ -97,8 +101,23 @@ static void discover_pointer_location()
 		zwlr_virtual_pointer_v1_motion(wl.ptr, 0,
 					       wl_fixed_from_int(1),
 					       wl_fixed_from_int(1));
+		wl_display_flush(wl.dpy);
 
-		wl_display_dispatch(wl.dpy);
+		pfd.fd = wl_fd;
+		pfd.events = POLLIN;
+		if (poll(&pfd, 1, 100) > 0)
+			wl_display_dispatch(wl.dpy);
+		else
+			wl_display_dispatch_pending(wl.dpy);
+
+		attempts++;
+	}
+
+	if (!ptr.scr) {
+		fprintf(stderr, "WARNING: Could not discover pointer location, defaulting to screen 0\n");
+		ptr.scr = &screens[0];
+		ptr.x = screens[0].w / 2;
+		ptr.y = screens[0].h / 2;
 	}
 
 	for (i = 0; i < nr_screens; i++) {

@@ -387,6 +387,9 @@ void way_commit() { }
 
 static void cleanup()
 {
+	if (!wl.dpy)
+		return;
+
 	way_mouse_show();
 
 	if (btn_state[0])
@@ -395,7 +398,15 @@ static void cleanup()
 		zwlr_virtual_pointer_v1_button(wl.ptr, 0, 274, 0);
 	if (btn_state[2])
 		zwlr_virtual_pointer_v1_button(wl.ptr, 0, 273, 0);
+
+	if (wl.ptr) {
+		zwlr_virtual_pointer_v1_destroy(wl.ptr);
+		wl.ptr = NULL;
+	}
+
 	wl_display_flush(wl.dpy);
+	wl_display_disconnect(wl.dpy);
+	wl.dpy = NULL;
 }
 
 static void sig_handler(int sig)
