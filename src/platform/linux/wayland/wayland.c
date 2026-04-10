@@ -333,39 +333,32 @@ struct input_event *way_input_wait(struct input_event *events, const char *names
 		exit(1);
 	}
 
-	/* Destroy previous shortcuts if any. */
-	for (i = 0; i < shortcuts.n; i++)
-		if (shortcuts.entries[i].shortcut)
-			hyprland_global_shortcut_v1_destroy(shortcuts.entries[i].shortcut);
+	if (shortcuts.n == 0) {
+		/* Register a global shortcut for each activation event. */
+		for (i = 0; i < sz && i < MAX_SHORTCUTS; i++) {
+			struct shortcut_entry *entry = &shortcuts.entries[i];
 
-	memset(&shortcuts, 0, sizeof shortcuts);
-	shortcuts.triggered = -1;
+			entry->event = events[i];
 
-	/* Register a global shortcut for each activation event. */
-	for (i = 0; i < sz && i < MAX_SHORTCUTS; i++) {
-		struct shortcut_entry *entry = &shortcuts.entries[i];
+			entry->shortcut =
+				hyprland_global_shortcuts_manager_v1_register_shortcut(
+					wl.shortcuts_manager,
+					names[i], "warpd",
+					names[i],
+					config_get(names[i]));
 
-		entry->event = events[i];
+			hyprland_global_shortcut_v1_add_listener(
+				entry->shortcut, &shortcut_listener, entry);
+		}
+		shortcuts.n = i;
+		shortcuts.triggered = -1;
 
-		entry->shortcut =
-			hyprland_global_shortcuts_manager_v1_register_shortcut(
-				wl.shortcuts_manager,
-				names[i], "warpd",
-				names[i],
-				config_get(names[i]));
+		wl_display_flush(wl.dpy);
 
-		hyprland_global_shortcut_v1_add_listener(
-			entry->shortcut, &shortcut_listener, entry);
+		/* Record baseline mtime for monitored config file. */
+		if (monitored_file)
+			monitored_mtime = get_mtime(monitored_file);
 	}
-	shortcuts.n = i;
-
-	wl_display_flush(wl.dpy);
-
-	/* Record baseline mtime for monitored config file. */
-	if (monitored_file)
-		monitored_mtime = get_mtime(monitored_file);
-
-
 	fprintf(stdout, "warpd: waiting for global shortcuts\n");
 
 	way_input_open_mice();
@@ -398,10 +391,19 @@ struct input_event *way_input_wait(struct input_event *events, const char *names
 		wl_display_flush(wl.dpy);
 		wl_display_dispatch_pending(wl.dpy);
 
+		if (shortcuts.triggered >= 0)
+			break;
+
 		if (!poll(pfds, nfds, 500))  {
 			/* Timeout — check for config file changes. */
 			if (monitored_file &&
 			    get_mtime(monitored_file) != monitored_mtime) {
+				for (i = 0; i < shortcuts.n; i++)
+					if (shortcuts.entries[i].shortcut)
+						hyprland_global_shortcut_v1_destroy(shortcuts.entries[i].shortcut);
+
+				memset(&shortcuts, 0, sizeof shortcuts);
+
 				way_input_close_mice();
 				return NULL;
 			}
@@ -423,16 +425,19 @@ struct input_event *way_input_wait(struct input_event *events, const char *names
 		if (pfds[0].revents & POLLIN)
 			wl_display_dispatch(wl.dpy);
 
-		if (shortcuts.triggered >= 0) {
-			int idx = shortcuts.triggered;
-			result = shortcuts.entries[idx].event;
-			result.pressed = 1;
-			shortcuts.triggered = -1;
-			fprintf(stdout, "warpd: shortcut triggered: %s (%s)\n",
-				names[idx], input_event_tostr(&result));
-			way_input_close_mice();
-			return &result;
-		}
+		if (shortcuts.triggered >= 0)
+			break;
+	}
+
+	{
+		int idx = shortcuts.triggered;
+		result = shortcuts.entries[idx].event;
+		result.pressed = 1;
+		shortcuts.triggered = -1;
+		fprintf(stdout, "warpd: shortcut triggered: %s (%s)\n",
+			names[idx], input_event_tostr(&result));
+		way_input_close_mice();
+		return &result;
 	}
 }
 
@@ -469,6 +474,20 @@ static void cleanup()
 		zwlr_virtual_pointer_v1_destroy(wl.ptr);
 		wl.ptr = NULL;
 	}
+
+	for (size_t i = 0; i < shortcuts.n; i++) {
+		if (shortcuts.entries[i].shortcut) {
+			hyprland_global_shortcut_v1_destroy(shortcuts.entries[i].shortcut);
+			shortcuts.entries[i].shortcut = NULL;
+		}
+	}
+
+	if (wl.shortcuts_manager) {
+		hyprland_global_shortcuts_manager_v1_destroy(wl.shortcuts_manager);
+		wl.shortcuts_manager = NULL;
+	}
+
+	memset(&shortcuts, 0, sizeof shortcuts);
 
 	wl_display_flush(wl.dpy);
 	wl_display_disconnect(wl.dpy);

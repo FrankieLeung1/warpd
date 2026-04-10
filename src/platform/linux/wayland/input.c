@@ -30,6 +30,7 @@ struct evdev_event {
 #define ABS_MAX 0x3f
 #define EVIOCGRAB _IOW('E', 0x90, int)
 #define EVIOCGBIT(ev, len) _IOC(_IOC_READ, 'E', 0x20 + (ev), (len))
+#define EVIOCGKEY(len) _IOC(_IOC_READ, 'E', 0x18, (len))
 #define EVIOCGNAME(len) _IOC(_IOC_READ, 'E', 0x06, (len))
 
 #define EV_SYN 0x00
@@ -263,48 +264,29 @@ static int is_keyboard(int fd)
  * surface hack and the suspend/resume dance for clicks and scrolls.
  */
 
-void way_input_release_mods(int fd)
+/*
+ * Release all currently pressed keys on the given keyboard fd so the
+ * compositor sees them as released before we EVIOCGRAB the device.
+ * Without this, the non-modifier part of an activation shortcut
+ * (e.g. the 'x' in A-M-x) stays "pressed" in the compositor's view,
+ * causing the next shortcut activation to fail.
+ */
+void way_input_release_keys(int fd)
 {
-	static const unsigned short mod_keys[] = {
-		KEY_LEFTCTRL, KEY_RIGHTCTRL,
-		KEY_LEFTSHIFT, KEY_RIGHTSHIFT,
-		KEY_LEFTALT, KEY_RIGHTALT,
-		KEY_LEFTMETA, KEY_RIGHTMETA,
-	};
-
-	int own_fd = 0;
+	unsigned char key_state[(KEY_MAX + 7) / 8];
 	size_t i;
 
-	if (fd < 0) {
-		struct uinput_setup setup;
+	memset(key_state, 0, sizeof key_state);
+	if (ioctl(fd, EVIOCGKEY(sizeof key_state), key_state) < 0)
+		return;
 
-		fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
-		if (fd < 0) {
-			fprintf(stderr, "WARNING: cannot open /dev/uinput to release mods\n");
-			return;
-		}
-		own_fd = 1;
+	for (i = 0; i <= KEY_MAX; i++) {
+		if (!(key_state[i / 8] & (1 << (i % 8))))
+			continue;
 
-		ioctl(fd, UI_SET_EVBIT, EV_KEY);
-		for (i = 0; i < sizeof mod_keys / sizeof mod_keys[0]; i++)
-			ioctl(fd, UI_SET_KEYBIT, mod_keys[i]);
-
-		memset(&setup, 0, sizeof setup);
-		snprintf(setup.name, sizeof setup.name, "warpd-mod-release");
-		setup.id.bustype = BUS_VIRTUAL;
-		setup.id.vendor = 0x1234;
-		setup.id.product = 0x5678;
-		ioctl(fd, UI_DEV_SETUP, &setup);
-		ioctl(fd, UI_DEV_CREATE);
-
-		/* Small delay for compositor to register the device. */
-		usleep(50000);
-	}
-
-	for (i = 0; i < sizeof mod_keys / sizeof mod_keys[0]; i++) {
 		struct evdev_event ev = {0};
 		ev.type = EV_KEY;
-		ev.code = mod_keys[i];
+		ev.code = i;
 		ev.value = 0; /* release */
 		write(fd, &ev, sizeof ev);
 	}
@@ -316,11 +298,6 @@ void way_input_release_mods(int fd)
 		ev.code = SYN_REPORT;
 		ev.value = 0;
 		write(fd, &ev, sizeof ev);
-	}
-
-	if (own_fd) {
-		ioctl(fd, UI_DEV_DESTROY);
-		close(fd);
 	}
 }
 
@@ -359,10 +336,10 @@ void way_input_grab_keyboard()
 		}
 
 		/*
-		 * Inject mod release events BEFORE grabbing so the
+		 * Release all pressed keys BEFORE grabbing so the
 		 * compositor still sees them on this physical device.
 		 */
-		way_input_release_mods(fd);
+		way_input_release_keys(fd);
 
 		if (ioctl(fd, EVIOCGRAB, 1) < 0) {
 			name[0] = '\0';
