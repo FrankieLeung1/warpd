@@ -6,7 +6,48 @@
 
 #include "warpd.h"
 
+#ifndef _WIN32
+#include <signal.h>
+#include <execinfo.h>
+#include <unistd.h>
+#endif
+
 struct platform *platform = NULL;
+
+void __attribute__((used)) releaseDevices()
+{
+	printf("releaseDevices() called");
+	if (platform && platform->input_ungrab_keyboard)
+	{
+		platform->input_ungrab_keyboard();
+	}
+}
+
+#ifndef _WIN32
+static void crash_handler(int sig)
+{
+	void *array[128];
+	size_t size;
+
+	fprintf(stderr, "Error: signal %d:\n", sig);
+
+	size = backtrace(array, 128);
+	backtrace_symbols_fd(array, size, STDERR_FILENO);
+
+	exit(1);
+}
+
+static void setup_crash_handler()
+{
+	signal(SIGSEGV, crash_handler);
+	signal(SIGABRT, crash_handler);
+	signal(SIGFPE, crash_handler);
+	signal(SIGILL, crash_handler);
+	signal(SIGBUS, crash_handler);
+}
+#else
+static void setup_crash_handler() {}
+#endif
 
 static const char *config_path;
 
@@ -209,6 +250,9 @@ int main(int argc, char *argv[])
 {
 	int c;
 	int foreground = 0;
+
+	setup_crash_handler();
+
 	config_path = get_config_path("config");
 
 	struct option opts[] = {

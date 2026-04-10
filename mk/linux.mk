@@ -1,3 +1,4 @@
+CFLAGS+=-rdynamic
 CFILES=$(shell find src/platform/linux/*.c src/*.c)
 
 ifndef DISABLE_WAYLAND

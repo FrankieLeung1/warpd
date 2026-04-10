@@ -136,6 +136,7 @@ void init_mouse();
 
 const char *get_config_path(const char *file);
 const char *get_data_path(const char *file);
+void releaseDevices();
 void parse_config(const char *path);
 const char *config_get(const char *key);
 int config_get_int(const char *key);
