@@ -105,7 +105,8 @@ void way_mouse_move(struct screen *scr, int x, int y)
 			maxx = ex;
 	}
 
-	if (x == -1 && y == -1) {
+	int hide = (x == -1 && y == -1);
+	if (hide) {
 		x = maxx - minx - scr->x;
 		y = maxy - miny - scr->y;
 
@@ -117,10 +118,9 @@ void way_mouse_move(struct screen *scr, int x, int y)
 		ptr.y = y;
 		ptr.scr = scr;
 	}
-	// printf("xy %d %d\n", ptr.x, ptr.y);
 
 	/*
-	 * Virtual pointer space always beings at 0,0, while global compositor
+	 * Virtual pointer space always begins at 0,0, while global compositor
 	 * space may have a negative real origin :/.
 	 */
 	zwlr_virtual_pointer_v1_motion_absolute(wl.ptr, 0,
@@ -129,6 +129,25 @@ void way_mouse_move(struct screen *scr, int x, int y)
 						wl_fixed_from_int(maxx-minx),
 						wl_fixed_from_int(maxy-miny));
 	zwlr_virtual_pointer_v1_frame(wl.ptr);
+
+	/*
+	 * Send a zero-delta relative motion to force Hyprland to send a
+	 * pointer frame to the focused client. onMouseWarp (absolute path)
+	 * omits sendPointerFrame(), while onMouseMoved (relative path)
+	 * always sends it.
+	 *
+	 * Skip this when hiding the cursor to the corner — the relative
+	 * motion goes through warpTo→closestValid which clamps the
+	 * out-of-bounds corner position back into the screen, breaking
+	 * the position sentinel used by mouse_get_position to detect that
+	 * the cursor hasn't been moved by the user.
+	 */
+	if (!hide) {
+		zwlr_virtual_pointer_v1_motion(wl.ptr, 0,
+					       wl_fixed_from_int(0),
+					       wl_fixed_from_int(0));
+		zwlr_virtual_pointer_v1_frame(wl.ptr);
+	}
 
 	wl_display_flush(wl.dpy);
 }
