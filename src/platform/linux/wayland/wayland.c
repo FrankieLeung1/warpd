@@ -9,6 +9,8 @@
 #include <limits.h>
 #include <signal.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include "wayland.h"
 
 extern const char *input_event_tostr(struct input_event *ev);
@@ -206,16 +208,51 @@ void way_mouse_get_position(struct screen **scr, int *x, int *y)
 		*y = ptr.y;
 }
 
+static int hyprland_ipc(const char *cmd)
+{
+	const char *sig = getenv("HYPRLAND_INSTANCE_SIGNATURE");
+	const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+	struct sockaddr_un addr;
+	char buf[64];
+	int fd, r;
+
+	if (!sig || !runtime_dir)
+		return -1;
+
+	fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (fd < 0)
+		return -1;
+
+	memset(&addr, 0, sizeof addr);
+	addr.sun_family = AF_UNIX;
+	snprintf(addr.sun_path, sizeof addr.sun_path,
+		 "%s/hypr/%s/.socket.sock", runtime_dir, sig);
+
+	if (connect(fd, (struct sockaddr *)&addr, sizeof addr) < 0) {
+		close(fd);
+		return -1;
+	}
+
+	r = write(fd, cmd, strlen(cmd));
+	if (r > 0)
+		/* drain the response so the socket closes cleanly */
+		while (read(fd, buf, sizeof buf) > 0)
+			;
+
+	close(fd);
+	return r > 0 ? 0 : -1;
+}
+
 void way_mouse_show()
 {
 	if (is_hyprland)
-		system("hyprctl keyword cursor:invisible false >/dev/null 2>&1");
+		hyprland_ipc("/keyword cursor:invisible false");
 }
 
 void way_mouse_hide()
 {
 	if (is_hyprland)
-		system("hyprctl keyword cursor:invisible true >/dev/null 2>&1");
+		hyprland_ipc("/keyword cursor:invisible true");
 	else
 		fprintf(stderr, "wayland: mouse hiding not implemented\n");
 }
