@@ -43,6 +43,14 @@ static void handle_global(void *data,
 		wl.layer_shell = wl_registry_bind(registry,
 						  name, &zwlr_layer_shell_v1_interface, 2);
 
+	if (!strcmp(interface, "wp_fractional_scale_manager_v1"))
+		wl.fractional_scale_manager = wl_registry_bind(registry,
+							       name, &wp_fractional_scale_manager_v1_interface, 1);
+
+	if (!strcmp(interface, "wp_viewporter"))
+		wl.viewporter = wl_registry_bind(registry,
+						 name, &wp_viewporter_interface, 1);
+
 	if (!strcmp(interface, "hyprland_global_shortcuts_manager_v1"))
 		wl.shortcuts_manager = wl_registry_bind(registry,
 							name, &hyprland_global_shortcuts_manager_v1_interface, 1);

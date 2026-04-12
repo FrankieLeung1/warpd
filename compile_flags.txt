@@ -8,6 +8,7 @@
 -pedantic
 -Wno-deprecated-declarations
 -Wno-unused-parameter
+-Wno-strict-prototypes
 -std=c99
 -D_DEFAULT_SOURCE
 -D_FORTIFY_SOURCE=2

@@ -20,7 +20,7 @@ int mode_loop(int initial_mode, int oneshot, int record_history)
 		}
 
 		platform->mouse_move(saved_scr, saved_x, saved_y);
-		platform->mouse_show();
+		platform->mouse_hide();
 		saved_scr = NULL;
 	}
 
@@ -105,7 +105,7 @@ exit:
 	if (ev && config_input_match(ev, "exit")) {
 		platform->mouse_get_position(&saved_scr, &saved_x, &saved_y);
 		platform->mouse_move(saved_scr, -1, -1);
-		// platform->mouse_hide();
+		platform->mouse_hide();
 	}
 	return rc;
 }

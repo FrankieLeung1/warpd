@@ -262,7 +262,7 @@ exit:
 		dragging = 0;
 	}
 
-	platform->mouse_show();
+	// platform->mouse_show();
 	platform->screen_clear(scr);
 
 	platform->input_ungrab_keyboard();

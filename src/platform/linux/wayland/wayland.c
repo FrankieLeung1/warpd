@@ -227,37 +227,42 @@ void way_mouse_get_position(struct screen **scr, int *x, int *y)
 		*y = ptr.y;
 }
 
-static int hyprland_ipc(const char *cmd)
+static struct sockaddr_un hypr_addr;
+static int hypr_addr_len;
+
+static void hyprland_ipc_init(void)
 {
 	const char *sig = getenv("HYPRLAND_INSTANCE_SIGNATURE");
 	const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
-	struct sockaddr_un addr;
-	char buf[64];
-	int fd, r;
 
 	if (!sig || !runtime_dir)
+		return;
+
+	memset(&hypr_addr, 0, sizeof hypr_addr);
+	hypr_addr.sun_family = AF_UNIX;
+	snprintf(hypr_addr.sun_path, sizeof hypr_addr.sun_path,
+		 "%s/hypr/%s/.socket.sock", runtime_dir, sig);
+	hypr_addr_len = sizeof hypr_addr;
+}
+
+static int hyprland_ipc(const char *cmd)
+{
+	int fd, r;
+
+	if (!hypr_addr.sun_path[0])
 		return -1;
 
 	fd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (fd < 0)
 		return -1;
 
-	memset(&addr, 0, sizeof addr);
-	addr.sun_family = AF_UNIX;
-	snprintf(addr.sun_path, sizeof addr.sun_path,
-		 "%s/hypr/%s/.socket.sock", runtime_dir, sig);
-
-	if (connect(fd, (struct sockaddr *)&addr, sizeof addr) < 0) {
+	if (connect(fd, (struct sockaddr *)&hypr_addr, hypr_addr_len) < 0) {
 		close(fd);
 		return -1;
 	}
 
 	r = write(fd, cmd, strlen(cmd));
-	if (r > 0)
-		/* drain the response so the socket closes cleanly */
-		while (read(fd, buf, sizeof buf) > 0)
-			;
-
+	shutdown(fd, SHUT_RDWR);
 	close(fd);
 	return r > 0 ? 0 : -1;
 }
@@ -431,6 +436,17 @@ struct input_event *way_input_wait(struct input_event *events, const char *names
 		nfds = 1;
 
 		/*
+		 * Check for physical mouse movement via evdev.
+		 * Restore and show the cursor when the user moves
+		 * their mouse.
+		 */
+		if (saved_scr && way_input_poll_mice(0)) {
+			way_mouse_move(saved_scr, saved_x, saved_y);
+			way_mouse_show();
+			saved_scr = NULL;
+		}
+
+		/*
 		 * If the cursor was hidden (saved_scr set), include
 		 * mouse fds in poll so physical movement wakes us
 		 * immediately regardless of the timeout.
@@ -465,17 +481,6 @@ struct input_event *way_input_wait(struct input_event *events, const char *names
 			}
 
 			continue;
-		}
-
-		/*
-		 * Check for physical mouse movement via evdev.
-		 * Restore and show the cursor when the user moves
-		 * their mouse.
-		 */
-		if (saved_scr && way_input_poll_mice(0)) {
-			way_mouse_move(saved_scr, saved_x, saved_y);
-			way_mouse_show();
-			saved_scr = NULL;
 		}
 
 		if (pfds[0].revents & POLLIN)
@@ -559,6 +564,9 @@ static void sig_handler(int sig)
 void wayland_init(struct platform *platform)
 {
 	is_hyprland = getenv("HYPRLAND_INSTANCE_SIGNATURE") != NULL;
+
+	if (is_hyprland)
+		hyprland_ipc_init();
 
 	signal(SIGINT, sig_handler);
 	signal(SIGTERM, sig_handler);

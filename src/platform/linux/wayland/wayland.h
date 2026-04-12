@@ -26,6 +26,8 @@
 #include "wl/virtual-pointer.h"
 #include "wl/layer-shell.h"
 #include "wl/xdg-output.h"
+#include "wl/fractional-scale.h"
+#include "wl/viewporter.h"
 #include "wl/hyprland-global-shortcuts-v1.h"
 
 
@@ -41,6 +43,8 @@ struct wl {
 	struct zwlr_virtual_pointer_v1 *ptr;
 	struct zwlr_layer_shell_v1 *layer_shell;
 	struct zxdg_output_manager_v1 *xdg_output_manager;
+	struct wp_fractional_scale_manager_v1 *fractional_scale_manager;
+	struct wp_viewporter *viewporter;
 	struct hyprland_global_shortcuts_manager_v1 *shortcuts_manager;
 };
 
@@ -49,6 +53,11 @@ struct screen {
 	int y;
 	int w;
 	int h;
+
+	/* Physical (buffer) dimensions = logical * scale120 / 120 */
+	int pw;
+	int ph;
+	int scale120; /* scale factor in 120ths (120 = 1x, 240 = 2x, etc.) */
 
 	int ptrx;
 	int ptry;

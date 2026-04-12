@@ -7,8 +7,6 @@
 
 static void noop() {}
 
-/* TODO: add support for fractional scaling (requires xdg-output?). */
-
 /* A 'surface' in the local context can be thought of as a viewport into a
  * rectangular region of the screen's backing buffer (the wl_shm_pool).  It is
  * undergirded by a corresponding wayland surface and wayland layer surface with a
@@ -20,6 +18,7 @@ struct surface {
 	struct zwlr_layer_surface_v1 *wl_layer_surface;
 	struct wl_surface *wl_surface;
 	struct wl_buffer *wl_buffer;
+	struct wp_viewport *wl_viewport;
 
 	int configured;
 	int destroyed;
@@ -54,6 +53,8 @@ static const struct zwlr_layer_surface_v1_listener layer_surface_listener = {
 void destroy_surface(struct surface *sfc)
 {
 	if (sfc) {
+		if (sfc->wl_viewport)
+			wp_viewport_destroy(sfc->wl_viewport);
 		zwlr_layer_surface_v1_destroy(sfc->wl_layer_surface);
 		wl_surface_destroy(sfc->wl_surface);
 		wl_buffer_destroy(sfc->wl_buffer);
@@ -69,6 +70,8 @@ void destroy_surface(struct surface *sfc)
 struct surface *create_surface(struct screen *scr, int x, int y, int w, int h, int capture_input, int passthrough)
 {
 	struct surface *sfc = calloc(1, sizeof (struct surface));
+	int s120 = scr->scale120;
+	int px, py, pw, ph;
 
 	if (x < 0) {
 		x = 0;
@@ -83,7 +86,13 @@ struct surface *create_surface(struct screen *scr, int x, int y, int w, int h, i
 	if ((y+h) > scr->h)
 		y = scr->h-h;
 
-	sfc->wl_buffer = wl_shm_pool_create_buffer(scr->wl_pool, y*scr->stride + x*4, w, h, scr->stride, WL_SHM_FORMAT_ARGB8888);
+	/* Convert logical coordinates to physical (buffer) coordinates */
+	px = (x * s120 + 119) / 120;
+	py = (y * s120 + 119) / 120;
+	pw = (w * s120 + 119) / 120;
+	ph = (h * s120 + 119) / 120;
+
+	sfc->wl_buffer = wl_shm_pool_create_buffer(scr->wl_pool, py*scr->stride + px*4, pw, ph, scr->stride, WL_SHM_FORMAT_ARGB8888);
 	assert(sfc->wl_buffer);
 	sfc->wl_surface = wl_compositor_create_surface(wl.compositor);
 
@@ -100,6 +109,12 @@ struct surface *create_surface(struct screen *scr, int x, int y, int w, int h, i
 	zwlr_layer_surface_v1_set_anchor(sfc->wl_layer_surface, ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP|ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
 	zwlr_layer_surface_v1_set_margin(sfc->wl_layer_surface, y, 0, 0, x);
 	zwlr_layer_surface_v1_set_exclusive_zone(sfc->wl_layer_surface, -1);
+
+	/* Use viewporter to map the physical buffer to logical surface size */
+	if (wl.viewporter) {
+		sfc->wl_viewport = wp_viewporter_get_viewport(wl.viewporter, sfc->wl_surface);
+		wp_viewport_set_destination(sfc->wl_viewport, w, h);
+	}
 
 	zwlr_layer_surface_v1_add_listener(sfc->wl_layer_surface, &layer_surface_listener, sfc);
 
