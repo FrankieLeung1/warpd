@@ -454,6 +454,7 @@ void init_input()
 }
 
 static int mouse_fds[MAX_MICE];
+static char mouse_names[MAX_MICE][32];
 static int nr_mice = 0;
 
 void way_input_open_mice()
@@ -462,16 +463,23 @@ void way_input_open_mice()
 	struct dirent *ent;
 	char path[256];
 
-	nr_mice = 0;
-
 	dir = opendir("/dev/input");
 	if (!dir)
 		return;
 
 	while ((ent = readdir(dir)) && nr_mice < MAX_MICE) {
-		int fd;
+		int fd, i, dup = 0;
 
 		if (strncmp(ent->d_name, "event", 5) != 0)
+			continue;
+
+		for (i = 0; i < nr_mice; i++) {
+			if (!strcmp(mouse_names[i], ent->d_name)) {
+				dup = 1;
+				break;
+			}
+		}
+		if (dup)
 			continue;
 
 		snprintf(path, sizeof path, "/dev/input/%s", ent->d_name);
@@ -485,6 +493,8 @@ void way_input_open_mice()
 			continue;
 		}
 
+		snprintf(mouse_names[nr_mice], sizeof mouse_names[nr_mice],
+			 "%s", ent->d_name);
 		mouse_fds[nr_mice++] = fd;
 	}
 

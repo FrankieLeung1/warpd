@@ -27,6 +27,17 @@ extern screen_t saved_scr;
 static int is_hyprland = 0;
 static uint8_t btn_state[3] = {0};
 
+static int hyprland_active_window_corner(int *gx, int *gy);
+
+/*
+ * Last position (in global compositor coords) at which we hid the
+ * cursor. way_mouse_get_position returns (-1, -1) while the cursor
+ * still sits there, so mode_loop's sentinel for "user hasn't moved the
+ * mouse since hide" keeps working when the hide position is in-bounds.
+ */
+static int hidden_gx = INT_MIN;
+static int hidden_gy = INT_MIN;
+
 static struct {
 	const char *name;
 	const char *xname;
@@ -106,17 +117,37 @@ void way_mouse_move(struct screen *scr, int x, int y)
 	}
 
 	int hide = (x == -1 && y == -1);
+	int hide_in_window = 0;
 	if (hide) {
-		x = maxx - minx - scr->x;
-		y = maxy - miny - scr->y;
+		int wgx, wgy;
+		/*
+		 * Prefer hiding inside the focused client's bottom-right
+		 * pixel so the client receives a motion event indicating the
+		 * cursor has moved out of its interactive area. Hiding to the
+		 * off-screen corner (the fallback) leaves the focused client
+		 * thinking the cursor is still wherever the user last left it.
+		 */
+		if (is_hyprland &&
+		    hyprland_active_window_corner(&wgx, &wgy) == 0) {
+			x = wgx - scr->x;
+			y = wgy - scr->y;
+			hide_in_window = 1;
+		} else {
+			x = maxx - minx - scr->x;
+			y = maxy - miny - scr->y;
+		}
 
 		ptr.x = -1;
 		ptr.y = -1;
 		ptr.scr = scr;
+		hidden_gx = x + scr->x;
+		hidden_gy = y + scr->y;
 	} else {
 		ptr.x = x;
 		ptr.y = y;
 		ptr.scr = scr;
+		hidden_gx = INT_MIN;
+		hidden_gy = INT_MIN;
 	}
 
 	/*
@@ -136,13 +167,14 @@ void way_mouse_move(struct screen *scr, int x, int y)
 	 * omits sendPointerFrame(), while onMouseMoved (relative path)
 	 * always sends it.
 	 *
-	 * Skip this when hiding the cursor to the corner — the relative
+	 * Skip when hiding to the off-screen fallback corner — the relative
 	 * motion goes through warpTo→closestValid which clamps the
-	 * out-of-bounds corner position back into the screen, breaking
-	 * the position sentinel used by mouse_get_position to detect that
-	 * the cursor hasn't been moved by the user.
+	 * out-of-bounds position back into the screen, leaving the cursor
+	 * at a different location than the absolute-motion target. Hiding
+	 * inside the focused window is in-bounds, so the relative motion is
+	 * safe and necessary to deliver the leave-area motion to the client.
 	 */
-	if (!hide) {
+	if (!hide || hide_in_window) {
 		zwlr_virtual_pointer_v1_motion(wl.ptr, 0,
 					       wl_fixed_from_int(0),
 					       wl_fixed_from_int(0));
@@ -199,6 +231,21 @@ void way_mouse_get_position(struct screen **scr, int *x, int *y)
 		if (fp) {
 			int gx, gy;
 			if (fscanf(fp, "%d, %d", &gx, &gy) == 2) {
+				/*
+				 * Cursor is still parked exactly where we
+				 * hid it — report the (-1, -1) sentinel so
+				 * mode_loop knows the user hasn't moved it.
+				 */
+				if (gx == hidden_gx && gy == hidden_gy) {
+					if (scr)
+						*scr = ptr.scr;
+					if (x)
+						*x = -1;
+					if (y)
+						*y = -1;
+					pclose(fp);
+					return;
+				}
 				size_t i;
 				for (i = 0; i < nr_screens; i++) {
 					struct screen *s = &screens[i];
@@ -267,6 +314,79 @@ static int hyprland_ipc(const char *cmd)
 	return r > 0 ? 0 : -1;
 }
 
+static int hyprland_query(const char *cmd, char *buf, size_t bufsz)
+{
+	int fd, n;
+	size_t total = 0;
+
+	if (!hypr_addr.sun_path[0] || bufsz == 0)
+		return -1;
+
+	fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (fd < 0)
+		return -1;
+
+	if (connect(fd, (struct sockaddr *)&hypr_addr, hypr_addr_len) < 0) {
+		close(fd);
+		return -1;
+	}
+
+	if (write(fd, cmd, strlen(cmd)) < 0) {
+		close(fd);
+		return -1;
+	}
+
+	while (total < bufsz - 1) {
+		n = read(fd, buf + total, bufsz - 1 - total);
+		if (n <= 0)
+			break;
+		total += n;
+	}
+	buf[total] = '\0';
+	close(fd);
+	return (int)total;
+}
+
+/*
+ * Parse Hyprland's "activewindow" output and return the bottom-right
+ * pixel of the focused window in global compositor coords. Returns -1
+ * if there is no focused window or the IPC query fails.
+ */
+static int hyprland_active_window_corner(int *gx, int *gy)
+{
+	char buf[4096];
+	int wx = 0, wy = 0, ww = 0, wh = 0;
+	int got_at = 0, got_size = 0;
+	char *line = buf;
+
+	if (hyprland_query("activewindow", buf, sizeof buf) <= 0)
+		return -1;
+
+	while (line && *line) {
+		char *next = strchr(line, '\n');
+		if (next)
+			*next++ = '\0';
+
+		char *p = line;
+		while (*p == '\t' || *p == ' ')
+			p++;
+
+		if (!strncmp(p, "at: ", 4))
+			got_at = (sscanf(p + 4, "%d,%d", &wx, &wy) == 2);
+		else if (!strncmp(p, "size: ", 6))
+			got_size = (sscanf(p + 6, "%d,%d", &ww, &wh) == 2);
+
+		line = next;
+	}
+
+	if (!got_at || !got_size || ww <= 0 || wh <= 0)
+		return -1;
+
+	*gx = wx + ww - 1;
+	*gy = wy + wh - 1;
+	return 0;
+}
+
 void way_mouse_show()
 {
 	if (is_hyprland)
@@ -321,7 +441,7 @@ void way_scroll(int direction)
 	wl_display_flush(wl.dpy);
 }
 
-void way_copy_selection() { UNIMPLEMENTED }
+void way_copy_selection() { /* UNIMPLEMENTED */ }
 
 /*
  * Global shortcut state for daemon mode (Hyprland only).
@@ -438,12 +558,16 @@ struct input_event *way_input_wait(struct input_event *events, const char *names
 		/*
 		 * Check for physical mouse movement via evdev.
 		 * Restore and show the cursor when the user moves
-		 * their mouse.
+		 * their mouse. Rescan first so a mouse hot-plugged
+		 * after warpd was activated is picked up.
 		 */
-		if (saved_scr && way_input_poll_mice(0)) {
-			way_mouse_move(saved_scr, saved_x, saved_y);
-			way_mouse_show();
-			saved_scr = NULL;
+		if (saved_scr) {
+			way_input_open_mice();
+			if (way_input_poll_mice(0)) {
+				way_mouse_move(saved_scr, saved_x, saved_y);
+				way_mouse_show();
+				saved_scr = NULL;
+			}
 		}
 
 		/*
