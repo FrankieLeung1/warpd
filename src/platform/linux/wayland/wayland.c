@@ -27,7 +27,7 @@ extern screen_t saved_scr;
 static int is_hyprland = 0;
 static uint8_t btn_state[3] = {0};
 
-static int hyprland_active_window_corner(int *gx, int *gy);
+static int hyprland_active_window_right_edge(int *gx, int *gy);
 
 /*
  * Last position (in global compositor coords) at which we hid the
@@ -121,14 +121,14 @@ void way_mouse_move(struct screen *scr, int x, int y)
 	if (hide) {
 		int wgx, wgy;
 		/*
-		 * Prefer hiding inside the focused client's bottom-right
-		 * pixel so the client receives a motion event indicating the
-		 * cursor has moved out of its interactive area. Hiding to the
-		 * off-screen corner (the fallback) leaves the focused client
-		 * thinking the cursor is still wherever the user last left it.
+		 * Prefer hiding on the focused client's right edge so the
+		 * client receives a motion event indicating the cursor has
+		 * moved out of its interactive area. Hiding to the off-screen
+		 * corner (the fallback) leaves the focused client thinking the
+		 * cursor is still wherever the user last left it.
 		 */
 		if (is_hyprland &&
-		    hyprland_active_window_corner(&wgx, &wgy) == 0) {
+		    hyprland_active_window_right_edge(&wgx, &wgy) == 0) {
 			x = wgx - scr->x;
 			y = wgy - scr->y;
 			hide_in_window = 1;
@@ -348,11 +348,11 @@ static int hyprland_query(const char *cmd, char *buf, size_t bufsz)
 }
 
 /*
- * Parse Hyprland's "activewindow" output and return the bottom-right
- * pixel of the focused window in global compositor coords. Returns -1
+ * Parse Hyprland's "activewindow" output and return the middle of the
+ * focused window's right edge in global compositor coords. Returns -1
  * if there is no focused window or the IPC query fails.
  */
-static int hyprland_active_window_corner(int *gx, int *gy)
+static int hyprland_active_window_right_edge(int *gx, int *gy)
 {
 	char buf[4096];
 	int wx = 0, wy = 0, ww = 0, wh = 0;
@@ -383,7 +383,7 @@ static int hyprland_active_window_corner(int *gx, int *gy)
 		return -1;
 
 	*gx = wx + ww - 1;
-	*gy = wy + wh - 1;
+	*gy = wy + wh / 2;
 	return 0;
 }
 
