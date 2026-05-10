@@ -276,11 +276,15 @@ void way_mouse_get_position(struct screen **scr, int *x, int *y)
 
 static struct sockaddr_un hypr_addr;
 static int hypr_addr_len;
+static int hypr_use_lua;
+
+static int hyprland_query(const char *cmd, char *buf, size_t bufsz);
 
 static void hyprland_ipc_init(void)
 {
 	const char *sig = getenv("HYPRLAND_INSTANCE_SIGNATURE");
 	const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+	char buf[128];
 
 	if (!sig || !runtime_dir)
 		return;
@@ -290,6 +294,16 @@ static void hyprland_ipc_init(void)
 	snprintf(hypr_addr.sun_path, sizeof hypr_addr.sun_path,
 		 "%s/hypr/%s/.socket.sock", runtime_dir, sig);
 	hypr_addr_len = sizeof hypr_addr;
+
+	/*
+	 * Hyprland's lua config manager rejects /keyword ("keyword can't
+	 * work with non-legacy parsers. Use eval."). Probe with a no-op
+	 * /eval; legacy replies "eval is only supported with the lua
+	 * config manager", lua replies "ok".
+	 */
+	if (hyprland_query("/eval return 1", buf, sizeof buf) > 0 &&
+	    strncmp(buf, "eval is only", 12) != 0)
+		hypr_use_lua = 1;
 }
 
 static int hyprland_ipc(const char *cmd)
@@ -389,16 +403,24 @@ static int hyprland_active_window_right_edge(int *gx, int *gy)
 
 void way_mouse_show()
 {
-	if (is_hyprland)
+	if (!is_hyprland)
+		return;
+	if (hypr_use_lua)
+		hyprland_ipc("/eval hl.config({ cursor = { invisible = false } })");
+	else
 		hyprland_ipc("/keyword cursor:invisible false");
 }
 
 void way_mouse_hide()
 {
-	if (is_hyprland)
-		hyprland_ipc("/keyword cursor:invisible true");
-	else
+	if (!is_hyprland) {
 		fprintf(stderr, "wayland: mouse hiding not implemented\n");
+		return;
+	}
+	if (hypr_use_lua)
+		hyprland_ipc("/eval hl.config({ cursor = { invisible = true } })");
+	else
+		hyprland_ipc("/keyword cursor:invisible true");
 }
 
 static uint32_t get_time_msec() {
