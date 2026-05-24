@@ -199,7 +199,6 @@ struct input_event *grid_mode()
 exit:
 	config_input_whitelist(NULL, 0);
 	platform->screen_clear(scr);
-	platform->mouse_show();
 
 	platform->input_ungrab_keyboard();
 

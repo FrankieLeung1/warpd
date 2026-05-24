@@ -308,8 +308,37 @@ void way_input_grab_keyboard()
 	char path[256];
 	char name[256];
 
-	nr_keyboards = 0;
+	/*
+	 * Fast path: fds are still open from a previous grab/ungrab cycle.
+	 * Re-apply EVIOCGRAB without rescanning /dev/input, which avoids
+	 * the expensive directory walk on every mode transition (grid→normal,
+	 * hint→normal, etc.).
+	 */
+	if (nr_keyboards > 0) {
+		int i, j = 0;
 
+		for (i = 0; i < nr_keyboards; i++) {
+			way_input_release_keys(keyboard_fds[i]);
+
+			if (ioctl(keyboard_fds[i], EVIOCGRAB, 1) < 0) {
+				/* Device was unplugged while ungrabbed; drop it. */
+				close(keyboard_fds[i]);
+				continue;
+			}
+
+			keyboard_fds[j++] = keyboard_fds[i];
+		}
+
+		nr_keyboards = j;
+		x_active_mods = 0;
+
+		if (nr_keyboards > 0)
+			return;
+
+		/* All cached fds gone; fall through to a full rescan. */
+	}
+
+	/* Slow path: first activation, or all cached devices disappeared. */
 	dir = opendir("/dev/input");
 	if (!dir) {
 		fprintf(stderr, "FATAL: Cannot open /dev/input\n");
@@ -376,11 +405,14 @@ void way_input_ungrab_keyboard()
 {
 	int i;
 
-	for (i = 0; i < nr_keyboards; i++) {
+	for (i = 0; i < nr_keyboards; i++)
 		ioctl(keyboard_fds[i], EVIOCGRAB, 0);
-		close(keyboard_fds[i]);
-	}
-	nr_keyboards = 0;
+
+	/*
+	 * Keep fds open so way_input_grab_keyboard() can re-grab them
+	 * instantly on the next mode transition without rescanning /dev/input.
+	 * nr_keyboards is intentionally left non-zero.
+	 */
 }
 
 struct input_event *way_input_next_event(int timeout)

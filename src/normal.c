@@ -87,7 +87,9 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 	platform->mouse_get_position(&scr, &mx, &my);
 	platform->screen_get_dimensions(scr, &sw, &sh);
 
-	if (!system_cursor)
+	if (system_cursor)
+		platform->mouse_show();
+	else
 		platform->mouse_hide();
 
 	mouse_reset();
