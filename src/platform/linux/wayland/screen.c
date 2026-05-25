@@ -184,19 +184,45 @@ static void init_screen_pool(struct screen *scr)
 	bufsz = scr->stride * scr->ph + scr->pw * 4;
 	sprintf(shm_path, "/warpd_%d", shm_num++);
 
+	/*
+	 * Try to remove any stale shm object before opening (e.g. left by a
+	 * previous run as a different user, which would cause EACCES on
+	 * O_TRUNC below).  Ignore errors — it may simply not exist.
+	 */
+	shm_unlink(shm_path);
+
 	fd = shm_open(shm_path, O_CREAT|O_TRUNC|O_RDWR, 0600);
 	if (fd < 0) {
 		perror("shm_open");
 		exit(-1);
 	}
 
-	ftruncate(fd, bufsz);
+	if (ftruncate(fd, bufsz) < 0) {
+		perror("ftruncate");
+		shm_unlink(shm_path);
+		close(fd);
+		exit(-1);
+	}
 
 	scr->wl_pool = wl_shm_create_pool(wl.shm, fd, bufsz);
 	buf = mmap(NULL, bufsz, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
+
+	/*
+	 * Unlink the name immediately after mmap.  The mapping remains valid
+	 * (it is now backed anonymously) but the shm object name is freed so
+	 * that a restarting warpd instance cannot O_TRUNC our live buffer,
+	 * which would shrink the backing store to 0 bytes and cause SIGBUS
+	 * the next time Cairo writes into it.
+	 */
+	shm_unlink(shm_path);
 	close(fd);
 
-	cairo_surface = cairo_image_surface_create_for_data(buf,
+	if (buf == MAP_FAILED) {
+		perror("mmap");
+		exit(-1);
+	}
+
+	cairo_surface = cairo_image_surface_create_for_data((unsigned char *)buf,
 							    CAIRO_FORMAT_ARGB32, scr->pw,
 							    scr->ph, scr->stride);
 	scr->cr = cairo_create(cairo_surface);
@@ -252,6 +278,9 @@ static void discover_screen_scale(struct screen *scr)
 		scr->scale120 = 120;
 		return;
 	}
+
+	/* Remove stale object so EACCES from a previous root-run can't block us. */
+	shm_unlink("/warpd_scale_tmp");
 
 	fd = shm_open("/warpd_scale_tmp", O_CREAT|O_TRUNC|O_RDWR, 0600);
 	if (fd < 0) {

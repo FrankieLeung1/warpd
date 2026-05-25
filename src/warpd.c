@@ -10,6 +10,10 @@
 #include <signal.h>
 #include <execinfo.h>
 #include <unistd.h>
+#include <time.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <string.h>
 #endif
 
 struct platform *platform = NULL;
@@ -24,29 +28,69 @@ void __attribute__((used)) releaseDevices()
 }
 
 #ifndef _WIN32
+/* fd for dedicated crash log file; written in addition to stderr */
+static int crash_log_fd = -1;
+
 static void crash_handler(int sig)
 {
 	void *array[128];
 	size_t size;
+	const char *signame;
+	time_t t;
+	char timebuf[64];
 
-	fprintf(stderr, "Error: signal %d:\n", sig);
+	switch (sig) {
+		case SIGSEGV: signame = "SIGSEGV (Segmentation fault)"; break;
+		case SIGABRT: signame = "SIGABRT (Abort)";              break;
+		case SIGFPE:  signame = "SIGFPE (Floating point exception)"; break;
+		case SIGILL:  signame = "SIGILL (Illegal instruction)"; break;
+		case SIGBUS:  signame = "SIGBUS (Bus error)";           break;
+		default:      signame = "unknown";                       break;
+	}
+
+	t = time(NULL);
+	/* ctime_r includes a trailing newline */
+	ctime_r(&t, timebuf);
+	timebuf[sizeof timebuf - 1] = '\0';
 
 	size = backtrace(array, 128);
-	backtrace_symbols_fd(array, size, STDERR_FILENO);
+
+	int fds[2] = {STDERR_FILENO, crash_log_fd};
+	int nfds = (crash_log_fd >= 0) ? 2 : 1;
+
+	for (int i = 0; i < nfds; i++) {
+		int fd = fds[i];
+		dprintf(fd, "\n===== warpd crash report =====\n");
+		dprintf(fd, "Time:    %s", timebuf);
+		dprintf(fd, "Version: %s\n", VERSION);
+		dprintf(fd, "Signal:  %d (%s)\n", sig, signame);
+		dprintf(fd, "Backtrace (%zu frames):\n", size);
+		backtrace_symbols_fd(array, size, fd);
+		dprintf(fd, "===== end of crash report =====\n\n");
+	}
 
 	exit(1);
 }
 
-static void setup_crash_handler()
+static void setup_crash_handler(const char *crash_log_path)
 {
+	if (crash_log_path) {
+		crash_log_fd = open(crash_log_path,
+		                    O_WRONLY | O_CREAT | O_APPEND, 0600);
+		if (crash_log_fd < 0)
+			fprintf(stderr,
+			        "warpd: warning: could not open crash log %s: %s\n",
+			        crash_log_path, strerror(errno));
+	}
+
 	signal(SIGSEGV, crash_handler);
 	signal(SIGABRT, crash_handler);
-	signal(SIGFPE, crash_handler);
-	signal(SIGILL, crash_handler);
-	signal(SIGBUS, crash_handler);
+	signal(SIGFPE,  crash_handler);
+	signal(SIGILL,  crash_handler);
+	signal(SIGBUS,  crash_handler);
 }
 #else
-static void setup_crash_handler() {}
+static void setup_crash_handler(const char *crash_log_path) { (void)crash_log_path; }
 #endif
 
 static const char *config_path;
@@ -124,24 +168,34 @@ static void lock()
 	}
 }
 
-static void daemonize()
+static void daemonize(const char *log_path)
 {
 	if (fork())
 		exit(0);
 	if (fork())
 		exit(0);
 
-	int fd = open("/dev/null", O_WRONLY);
-	if (fd < 0) {
-		perror("open");
+	int null_fd = open("/dev/null", O_WRONLY);
+	if (null_fd < 0) {
+		perror("open /dev/null");
 		exit(-1);
 	}
+
+	int log_fd = -1;
+	if (log_path)
+		log_fd = open(log_path, O_WRONLY | O_CREAT | O_APPEND, 0600);
 
 	close(1);
 	close(2);
 
-	dup2(fd, 1);
-	dup2(fd, 2);
+	/* stdout → log file (or /dev/null) */
+	dup2(log_fd >= 0 ? log_fd : null_fd, 1);
+	/* stderr → same log file so crash handler output is captured */
+	dup2(log_fd >= 0 ? log_fd : null_fd, 2);
+
+	if (log_fd >= 0)
+		close(log_fd);
+	close(null_fd);
 }
 
 static void print_usage()
@@ -251,8 +305,6 @@ int main(int argc, char *argv[])
 	int c;
 	int foreground = 0;
 
-	setup_crash_handler();
-
 	config_path = get_config_path("config");
 
 	struct option opts[] = {
@@ -346,15 +398,34 @@ int main(int argc, char *argv[])
 	}
 
 	if (mode || oneshot_flag) {
+		/* oneshot/query modes: crash log in data dir, stderr stays visible */
+		setup_crash_handler(get_data_path("crash.log"));
 		platform_run(oneshot_main);
 	} else {
 		lock();
 
+		/*
+		 * Compute log paths before daemonizing (get_data_path uses a
+		 * static buffer so copy the results out first).
+		 */
+		static char log_path[PATH_MAX];
+		static char crash_log_path[PATH_MAX];
+		strncpy(log_path,       get_data_path("warpd.log"),  PATH_MAX - 1);
+		strncpy(crash_log_path, get_data_path("crash.log"), PATH_MAX - 1);
+
+		/*
+		 * Set up the crash handler before daemonizing so it works for
+		 * both foreground (-f) and daemon modes.  The crash log gives
+		 * us a persistent record even when stderr goes to /dev/null.
+		 */
+		setup_crash_handler(crash_log_path);
+
 		if (!foreground)
-			daemonize();
+			daemonize(log_path);
 
 		setvbuf(stdout, NULL, _IOLBF, 0);
 		printf("Starting warpd " VERSION "\n");
+		printf("Logging to %s, crash log: %s\n", log_path, crash_log_path);
 
 		platform_run(daemon_main);
 	}
