@@ -83,6 +83,7 @@ static uint8_t x_active_mods = 0;
 struct keymap_entry keymap[256] = {0};
 
 static int keyboard_fds[MAX_KEYBOARDS];
+static char keyboard_names[MAX_KEYBOARDS][32];
 static int nr_keyboards = 0;
 
 static void noop() {}
@@ -307,48 +308,56 @@ void way_input_grab_keyboard()
 	struct dirent *ent;
 	char path[256];
 	char name[256];
+	int i, j;
 
 	/*
-	 * Fast path: fds are still open from a previous grab/ungrab cycle.
-	 * Re-apply EVIOCGRAB without rescanning /dev/input, which avoids
-	 * the expensive directory walk on every mode transition (grid→normal,
-	 * hint→normal, etc.).
+	 * Re-grab any cached fds first. Drop those whose underlying device
+	 * has been unplugged so the rescan below can pick up a replacement.
 	 */
-	if (nr_keyboards > 0) {
-		int i, j = 0;
+	j = 0;
+	for (i = 0; i < nr_keyboards; i++) {
+		way_input_release_keys(keyboard_fds[i]);
 
-		for (i = 0; i < nr_keyboards; i++) {
-			way_input_release_keys(keyboard_fds[i]);
-
-			if (ioctl(keyboard_fds[i], EVIOCGRAB, 1) < 0) {
-				/* Device was unplugged while ungrabbed; drop it. */
-				close(keyboard_fds[i]);
-				continue;
-			}
-
-			keyboard_fds[j++] = keyboard_fds[i];
+		if (ioctl(keyboard_fds[i], EVIOCGRAB, 1) < 0) {
+			close(keyboard_fds[i]);
+			continue;
 		}
 
-		nr_keyboards = j;
-		x_active_mods = 0;
-
-		if (nr_keyboards > 0)
-			return;
-
-		/* All cached fds gone; fall through to a full rescan. */
+		if (j != i)
+			memcpy(keyboard_names[j], keyboard_names[i],
+			       sizeof keyboard_names[j]);
+		keyboard_fds[j++] = keyboard_fds[i];
 	}
+	nr_keyboards = j;
 
-	/* Slow path: first activation, or all cached devices disappeared. */
+	/*
+	 * Always rescan /dev/input so hot-plugged keyboards are picked up.
+	 * Already-grabbed devices are matched by event-node basename and
+	 * skipped, so this is cheap on the common case (no new devices).
+	 */
 	dir = opendir("/dev/input");
 	if (!dir) {
-		fprintf(stderr, "FATAL: Cannot open /dev/input\n");
-		exit(-1);
+		if (nr_keyboards == 0) {
+			fprintf(stderr, "FATAL: Cannot open /dev/input\n");
+			exit(-1);
+		}
+		x_active_mods = 0;
+		return;
 	}
 
 	while ((ent = readdir(dir)) && nr_keyboards < MAX_KEYBOARDS) {
-		int fd;
+		int fd, dup = 0;
 
 		if (strncmp(ent->d_name, "event", 5) != 0)
+			continue;
+
+		for (i = 0; i < nr_keyboards; i++) {
+			if (!strcmp(keyboard_names[i], ent->d_name)) {
+				dup = 1;
+				break;
+			}
+		}
+		if (dup)
 			continue;
 
 		snprintf(path, sizeof path, "/dev/input/%s", ent->d_name);
@@ -364,10 +373,6 @@ void way_input_grab_keyboard()
 			continue;
 		}
 
-		/*
-		 * Release all pressed keys BEFORE grabbing so the
-		 * compositor still sees them on this physical device.
-		 */
 		way_input_release_keys(fd);
 
 		if (ioctl(fd, EVIOCGRAB, 1) < 0) {
@@ -378,6 +383,9 @@ void way_input_grab_keyboard()
 			continue;
 		}
 
+		snprintf(keyboard_names[nr_keyboards],
+			 sizeof keyboard_names[nr_keyboards],
+			 "%s", ent->d_name);
 		keyboard_fds[nr_keyboards++] = fd;
 	}
 
