@@ -166,7 +166,13 @@ static int hint_selection(screen_t scr, struct hint *_hints, size_t _nr_hints)
 			strcpy(last_selected_hint, buf);
 			break;
 		} else if (nr_matched == 0) {
-			break;
+			/*
+			 * Bad keystroke: undo it and re-show the previous
+			 * matches instead of silently exiting to normal mode
+			 * with rc=0.
+			 */
+			buf[len - 1] = 0;
+			filter(scr, buf);
 		}
 	}
 
@@ -275,6 +281,9 @@ int full_hint_mode(int second_pass)
 	hist_add(mx, my);
 
 	nr_hints = generate_fullscreen_hints(scr, hints);
+
+	if (nr_hints == 0)
+		return -1;
 
 	if (hint_selection(scr, hints, nr_hints))
 		return -1;
