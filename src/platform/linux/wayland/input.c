@@ -309,11 +309,13 @@ void way_input_grab_keyboard()
 	char path[256];
 	char name[256];
 	int i, j;
+	int prev_keyboards;
 
 	/*
 	 * Re-grab any cached fds first. Drop those whose underlying device
 	 * has been unplugged so the rescan below can pick up a replacement.
 	 */
+	prev_keyboards = nr_keyboards;
 	j = 0;
 	for (i = 0; i < nr_keyboards; i++) {
 		way_input_release_keys(keyboard_fds[i]);
@@ -331,9 +333,22 @@ void way_input_grab_keyboard()
 	nr_keyboards = j;
 
 	/*
-	 * Always rescan /dev/input so hot-plugged keyboards are picked up.
+	 * Fast path: all cached keyboards re-grabbed successfully and none
+	 * disappeared.  Skip the /dev/input scan (33+ devices on a typical
+	 * system) to avoid noticeable lag on every mode activation.
+	 * A rescan is only triggered when a device dropped (possible hotplug)
+	 * or on the very first grab (no cached devices yet).
+	 */
+	if (prev_keyboards > 0 && nr_keyboards == prev_keyboards) {
+		x_active_mods = 0;
+		return;
+	}
+
+	/*
+	 * Slow path: first grab, or at least one keyboard disappeared.
+	 * Rescan /dev/input to pick up hot-plugged replacements.
 	 * Already-grabbed devices are matched by event-node basename and
-	 * skipped, so this is cheap on the common case (no new devices).
+	 * skipped to avoid double-grabbing.
 	 */
 	dir = opendir("/dev/input");
 	if (!dir) {
