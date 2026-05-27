@@ -179,6 +179,14 @@ static void init_screen_pool(struct screen *scr)
 	scr->pw = (scr->w * scr->scale120 + 119) / 120;
 	scr->ph = (scr->h * scr->scale120 + 119) / 120;
 
+	if (scr->pw <= 0 || scr->ph <= 0) {
+		fprintf(stderr,
+		        "ERROR: screen has invalid dimensions "
+		        "(w=%d h=%d scale=%d -> pw=%d ph=%d)\n",
+		        scr->w, scr->h, scr->scale120, scr->pw, scr->ph);
+		exit(-1);
+	}
+
 	scr->stride = cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, scr->pw);
 
 	bufsz = scr->stride * scr->ph + scr->pw * 4;
@@ -321,6 +329,16 @@ static void discover_screen_scale(struct screen *scr)
 
 	while (scr->state == prev_state)
 		wl_display_dispatch(wl.dpy);
+
+	/*
+	 * scr->state is also incremented by xdg-output logical_position and
+	 * logical_size events.  If the compositor re-sends those while we're
+	 * waiting here, we'll wake up without ever receiving preferred_scale,
+	 * leaving scale120 == 0 and bufsz == 0 in init_screen_pool.  Fall
+	 * back to 1× if that happens.
+	 */
+	if (scr->scale120 == 0)
+		scr->scale120 = 120;
 
 	wp_fractional_scale_v1_destroy(fs);
 	zwlr_layer_surface_v1_destroy(tmp_layer);
