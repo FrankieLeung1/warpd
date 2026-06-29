@@ -7,6 +7,11 @@
 #include "warpd.h"
 #include <stdio.h>
 
+static int cursor_scale = 1;
+static uint64_t scale_start_time = 0;
+static uint64_t scale_end_time = 0;
+static int last_segment = -1;
+
 static void redraw(screen_t scr, int x, int y, int hide_cursor)
 {
 	int sw, sh;
@@ -19,12 +24,24 @@ static void redraw(screen_t scr, int x, int y, int hide_cursor)
 	const char *indicator_color = config_get("indicator_color");
 	const char *curcol = config_get("cursor_color");
 	const char *indicator = config_get("indicator");
-	const int cursz = config_get_int("cursor_size");
+	const int normal_cursz = config_get_int("cursor_size");
+	const int cursz = normal_cursz * cursor_scale;
+
+	if (cursor_scale > 1) {
+		uint64_t now = get_time_us();
+		if (now < scale_end_time) {
+			uint64_t elapsed = now - scale_start_time;
+			int segment = elapsed / 166666;
+			if (segment % 2 == 0) {
+				hide_cursor = 1;
+			}
+		}
+	}
 
 	platform->screen_clear(scr);
 
 	if (!hide_cursor)
-		platform->screen_draw_box(scr, x + 1, y - cursz / 2, cursz,
+		platform->screen_draw_box(scr, x + 1 + normal_cursz / 2 - cursz / 2, y - cursz / 2, cursz,
 					  cursz, dragging ? "#0000ff" : curcol);
 
 	if (!strcmp(indicator, "bottomleft"))
@@ -99,6 +116,21 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 	uint64_t time = 0;
 	uint64_t last_blink_update = 0;
 	while (1) {
+		uint64_t now = get_time_us();
+		if (cursor_scale > 1) {
+			if (now >= scale_end_time) {
+				cursor_scale = 1;
+				redraw(scr, mx, my, !show_cursor);
+			} else {
+				uint64_t elapsed = now - scale_start_time;
+				int segment = elapsed / 166666;
+				if (segment != last_segment) {
+					last_segment = segment;
+					redraw(scr, mx, my, !show_cursor);
+				}
+			}
+		}
+
 		config_input_whitelist(keys, sizeof keys / sizeof keys[0]);
 		if (start_ev == NULL) {
 			ev = platform->input_next_event(10);
@@ -134,6 +166,44 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 		if (mouse_process_key(ev, "up", "down", "left", "right")) {
 			redraw(scr, mx, my, !show_cursor);
 			continue;
+		}
+
+		if (ev && ev->pressed) {
+			int matched = 0;
+			const char *name = platform->input_lookup_name(ev->code, 0);
+
+			int is_modifier = 0;
+			if (name) {
+				if (strstr(name, "Control") || strstr(name, "Shift") ||
+				    strstr(name, "Alt") || strstr(name, "Meta") ||
+				    strstr(name, "Super")) {
+					is_modifier = 1;
+				}
+			}
+
+			if (is_modifier) {
+				matched = 1;
+			} else {
+				if (name && name[0] >= '0' && name[0] <= '9' && name[1] == '\0' && ev->mods == 0) {
+					matched = 1;
+				} else {
+					for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+						if (config_input_match(ev, keys[i])) {
+							matched = 1;
+							break;
+						}
+					}
+				}
+			}
+
+			if (!matched) {
+				cursor_scale = 3;
+				scale_start_time = get_time_us();
+				scale_end_time = scale_start_time + 1000000;
+				last_segment = 0;
+				redraw(scr, mx, my, !show_cursor);
+				goto next;
+			}
 		}
 
 		if (!ev) {
