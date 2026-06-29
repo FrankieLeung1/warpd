@@ -4,6 +4,7 @@ struct screen screens[MAX_SCREENS];
 size_t nr_screens;
 
 struct wl wl;
+int way_init_done = 0;
 
 static void handle_global(void *data,
 			  struct wl_registry *registry, uint32_t name,
@@ -32,7 +33,10 @@ static void handle_global(void *data,
 
 	if (!strcmp(interface, "wl_output")) {
 		struct wl_output *output = wl_registry_bind(registry, name, &wl_output_interface, 3);
-		add_screen(output);
+		add_screen(output, name);
+		if (way_init_done) {
+			initialize_screen(&screens[nr_screens - 1]);
+		}
 	}
 
 	if (!strcmp(interface, "zxdg_output_manager_v1")) {
@@ -59,8 +63,9 @@ static void handle_global(void *data,
 static void handle_global_remove(void *data,
 				  struct wl_registry *registry, uint32_t name)
 {
-	/* Nothing to do: we don't track globals by name. */
-	(void)data; (void)registry; (void)name;
+	(void)data;
+	(void)registry;
+	remove_screen(name);
 }
 
 static struct wl_registry_listener registry_listener = {
@@ -107,4 +112,5 @@ void way_init()
 	}
 
 	init_screen();
+	way_init_done = 1;
 }

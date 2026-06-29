@@ -120,10 +120,15 @@ struct surface *create_surface(struct screen *scr, int x, int y, int w, int h, i
 
 	sfc->configured = 0;
 
-	if (capture_input) {
+	extern int nr_keyboards;
+	const char *pulse = getenv("PULSE_SERVER");
+	int inside_container = (pulse && strstr(pulse, "wolf")) || (access("/run/user/wolf", F_OK) == 0);
+
+	if (capture_input || nr_keyboards == 0 || inside_container) {
 		zwlr_layer_surface_v1_set_keyboard_interactivity(sfc->wl_layer_surface,
 								  ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE);
 	}
+
 
 	sfc->pointer_passthrough = passthrough;
 

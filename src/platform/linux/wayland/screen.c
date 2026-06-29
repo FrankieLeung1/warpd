@@ -127,11 +127,13 @@ static void discover_pointer_location()
 	}
 }
 
-void add_screen(struct wl_output *output)
+void add_screen(struct wl_output *output, uint32_t name)
 {
+	assert(nr_screens < MAX_SCREENS);
 	struct screen *scr = &screens[nr_screens++];
 	scr->overlay = NULL;
 	scr->wl_output = output;
+	scr->wl_output_name = name;
 }
 
 void way_screen_draw_box(struct screen *scr, int x, int y, int w, int h, const char *color)
@@ -346,32 +348,86 @@ static void discover_screen_scale(struct screen *scr)
 	wl_buffer_destroy(tmp_buffer);
 }
 
+void initialize_screen(struct screen *scr)
+{
+	scr->xdg_output =
+	    zxdg_output_manager_v1_get_xdg_output(wl.xdg_output_manager,
+						  scr->wl_output);
+
+	zxdg_output_v1_add_listener(scr->xdg_output,
+				    &zxdg_output_v1_listener, scr);
+
+	scr->state = 0;
+	do {
+		wl_display_dispatch(wl.dpy);
+	} while (scr->state != 2);
+
+	discover_screen_scale(scr);
+
+	scr->ptrx = -1;
+	scr->ptry = -1;
+
+	init_screen_pool(scr);
+}
+
 void init_screen()
 {
 	size_t i;
 
 	for (i = 0; i < nr_screens; i++) {
 		struct screen *scr = &screens[i];
-
-		scr->xdg_output =
-		    zxdg_output_manager_v1_get_xdg_output(wl.xdg_output_manager,
-							  scr->wl_output);
-
-		zxdg_output_v1_add_listener(scr->xdg_output,
-					    &zxdg_output_v1_listener, scr);
-
-		scr->state = 0;
-		do {
-			wl_display_dispatch(wl.dpy);
-		} while (scr->state != 2);
-
-		discover_screen_scale(scr);
-
-		scr->ptrx = -1;
-		scr->ptry = -1;
-
-		init_screen_pool(scr);
+		initialize_screen(scr);
 	}
 
 	discover_pointer_location();
+}
+
+void remove_screen(uint32_t name)
+{
+	size_t i;
+	int idx = -1;
+
+	for (i = 0; i < nr_screens; i++) {
+		if (screens[i].wl_output_name == name) {
+			idx = i;
+			break;
+		}
+	}
+
+	if (idx != -1) {
+		struct screen *scr = &screens[idx];
+
+		way_screen_clear(scr);
+
+		if (scr->cr)
+			cairo_destroy(scr->cr);
+		if (scr->wl_pool)
+			wl_shm_pool_destroy(scr->wl_pool);
+		if (scr->xdg_output)
+			zxdg_output_v1_destroy(scr->xdg_output);
+		if (scr->wl_output)
+			wl_output_destroy(scr->wl_output);
+
+		for (i = idx; i < nr_screens - 1; i++)
+			screens[i] = screens[i + 1];
+
+		nr_screens--;
+
+		if (ptr.scr) {
+			size_t ptr_idx = ptr.scr - screens;
+			if (ptr_idx == (size_t)idx) {
+				if (nr_screens > 0) {
+					ptr.scr = &screens[0];
+					ptr.x = screens[0].w / 2;
+					ptr.y = screens[0].h / 2;
+				} else {
+					ptr.scr = NULL;
+					ptr.x = 0;
+					ptr.y = 0;
+				}
+			} else if (ptr_idx > (size_t)idx) {
+				ptr.scr = &screens[ptr_idx - 1];
+			}
+		}
+	}
 }

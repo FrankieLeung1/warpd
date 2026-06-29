@@ -71,6 +71,7 @@ struct screen {
 	struct surface *hints;
 
 	struct wl_output *wl_output;
+	uint32_t wl_output_name;
 	struct zxdg_output_v1 *xdg_output;
 
 	struct wl_shm_pool *wl_pool;
@@ -87,8 +88,11 @@ struct keymap_entry {
 
 extern struct screen screens[MAX_SCREENS];
 extern size_t nr_screens;
+extern int way_init_done;
 
-void add_screen(struct wl_output *output);
+void add_screen(struct wl_output *output, uint32_t name);
+void remove_screen(uint32_t name);
+void initialize_screen(struct screen *scr);
 int way_hex_to_rgba(const char *str, uint8_t *r, uint8_t *g, uint8_t *b, uint8_t *a);
 
 void init_screen();

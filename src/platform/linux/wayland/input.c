@@ -6,6 +6,7 @@
 #include "wayland.h"
 #include <dirent.h>
 #include <sys/ioctl.h>
+#include <errno.h>
 
 /*
  * evdev definitions. We avoid including <linux/input.h> directly because it
@@ -84,7 +85,7 @@ struct keymap_entry keymap[256] = {0};
 
 static int keyboard_fds[MAX_KEYBOARDS];
 static char keyboard_names[MAX_KEYBOARDS][32];
-static int nr_keyboards = 0;
+int nr_keyboards = 0;
 
 static void noop() {}
 
@@ -177,8 +178,31 @@ static void handle_keymap(void *data,
 	close(fd);
 }
 
+static void handle_key(void *data,
+		       struct wl_keyboard *wl_keyboard,
+		       uint32_t serial,
+		       uint32_t time,
+		       uint32_t key,
+		       uint32_t state)
+{
+	(void)data;
+	(void)wl_keyboard;
+	(void)serial;
+	(void)time;
+
+	/* value: 0=released, 1=pressed */
+	update_mods(key, state);
+
+	if (input_queue_sz < sizeof input_queue / sizeof input_queue[0]) {
+		struct input_event *qev = &input_queue[input_queue_sz++];
+		qev->code = key;
+		qev->pressed = state;
+		qev->mods = x_active_mods;
+	}
+}
+
 static struct wl_keyboard_listener wl_keyboard_listener = {
-	.key = noop,
+	.key = handle_key,
 	.keymap = handle_keymap,
 	.enter = noop,
 	.leave = noop,
@@ -214,23 +238,31 @@ static int is_keyboard(int fd)
 	unsigned long relbit[(REL_MAX / (8 * sizeof(long)) + 1)];
 	unsigned long absbit[(ABS_MAX / (8 * sizeof(long)) + 1)];
 	int i, has_keys;
+	char dev_name[256] = "Unknown";
+
+	ioctl(fd, EVIOCGNAME(sizeof dev_name), dev_name);
 
 	memset(evbit, 0, sizeof evbit);
 	memset(keybit, 0, sizeof keybit);
 	memset(relbit, 0, sizeof relbit);
 	memset(absbit, 0, sizeof absbit);
 
-	if (ioctl(fd, EVIOCGBIT(0, sizeof evbit), evbit) < 0)
+	if (ioctl(fd, EVIOCGBIT(0, sizeof evbit), evbit) < 0) {
+		fprintf(stderr, "[warpd debug] %s: Failed to get evbits\n", dev_name);
 		return 0;
+	}
 
-	if (!(evbit[0] & (1UL << EV_KEY)))
+	if (!(evbit[0] & (1UL << EV_KEY))) {
+		fprintf(stderr, "[warpd debug] %s: Missing EV_KEY capability\n", dev_name);
 		return 0;
+	}
 
 	/* Ignore devices with relative X/Y axes (mice) */
 	if (evbit[0] & (1UL << EV_REL)) {
 		if (ioctl(fd, EVIOCGBIT(EV_REL, sizeof relbit), relbit) >= 0) {
 			if ((relbit[REL_X / (8 * sizeof(long))] & (1UL << (REL_X % (8 * sizeof(long))))) &&
 			    (relbit[REL_Y / (8 * sizeof(long))] & (1UL << (REL_Y % (8 * sizeof(long)))))) {
+				fprintf(stderr, "[warpd debug] %s: Ignored because it has relative axes (mouse)\n", dev_name);
 				return 0;
 			}
 		}
@@ -241,13 +273,16 @@ static int is_keyboard(int fd)
 		if (ioctl(fd, EVIOCGBIT(EV_ABS, sizeof absbit), absbit) >= 0) {
 			if ((absbit[ABS_X / (8 * sizeof(long))] & (1UL << (ABS_X % (8 * sizeof(long))))) &&
 			    (absbit[ABS_Y / (8 * sizeof(long))] & (1UL << (ABS_Y % (8 * sizeof(long)))))) {
+				fprintf(stderr, "[warpd debug] %s: Ignored because it has absolute axes (touchpad/joystick)\n", dev_name);
 				return 0;
 			}
 		}
 	}
 
-	if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof keybit), keybit) < 0)
+	if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof keybit), keybit) < 0) {
+		fprintf(stderr, "[warpd debug] %s: Failed to get keybits\n", dev_name);
 		return 0;
+	}
 
 	/* Must have several typical keyboard keys (number row). */
 	has_keys = 0;
@@ -255,6 +290,8 @@ static int is_keyboard(int fd)
 		if (keybit[i / (8 * sizeof(long))] & (1UL << (i % (8 * sizeof(long)))))
 			has_keys++;
 	}
+
+	fprintf(stderr, "[warpd debug] %s: has_keys count: %d (needs >= 5)\n", dev_name, has_keys);
 
 	return has_keys >= 5;
 }
@@ -321,6 +358,7 @@ void way_input_grab_keyboard()
 		way_input_release_keys(keyboard_fds[i]);
 
 		if (ioctl(keyboard_fds[i], EVIOCGRAB, 1) < 0) {
+			fprintf(stderr, "[warpd debug] Failed to re-grab cached fd %d: %s\n", keyboard_fds[i], strerror(errno));
 			close(keyboard_fds[i]);
 			continue;
 		}
@@ -352,9 +390,9 @@ void way_input_grab_keyboard()
 	 */
 	dir = opendir("/dev/input");
 	if (!dir) {
+		fprintf(stderr, "[warpd debug] Failed to open /dev/input: %s\n", strerror(errno));
 		if (nr_keyboards == 0) {
-			fprintf(stderr, "FATAL: Cannot open /dev/input\n");
-			exit(-1);
+			fprintf(stderr, "WARNING: Cannot open /dev/input. Falling back to Wayland key events (requires window focus).\n");
 		}
 		x_active_mods = 0;
 		return;
@@ -380,8 +418,10 @@ void way_input_grab_keyboard()
 		fd = open(path, O_RDWR | O_NONBLOCK);
 		if (fd < 0)
 			fd = open(path, O_RDONLY | O_NONBLOCK);
-		if (fd < 0)
+		if (fd < 0) {
+			fprintf(stderr, "[warpd debug] Failed to open %s: %s\n", path, strerror(errno));
 			continue;
+		}
 
 		if (!is_keyboard(fd)) {
 			close(fd);
@@ -393,10 +433,12 @@ void way_input_grab_keyboard()
 		if (ioctl(fd, EVIOCGRAB, 1) < 0) {
 			name[0] = '\0';
 			ioctl(fd, EVIOCGNAME(sizeof name), name);
-			fprintf(stderr, "WARNING: Failed to grab %s (%s)\n", path, name);
+			fprintf(stderr, "WARNING: Failed to grab %s (%s): %s\n", path, name, strerror(errno));
 			close(fd);
 			continue;
 		}
+
+		fprintf(stderr, "[warpd debug] Successfully grabbed %s (%s)\n", path, name);
 
 		snprintf(keyboard_names[nr_keyboards],
 			 sizeof keyboard_names[nr_keyboards],
@@ -407,8 +449,7 @@ void way_input_grab_keyboard()
 	closedir(dir);
 
 	if (nr_keyboards == 0) {
-		fprintf(stderr, "FATAL: No keyboards found to grab (check permissions on /dev/input/)\n");
-		exit(-1);
+		fprintf(stderr, "WARNING: No keyboards found to grab (check permissions on /dev/input/). Falling back to Wayland key events (requires window focus).\n");
 	}
 
 	x_active_mods = 0;
