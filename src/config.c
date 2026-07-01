@@ -58,6 +58,7 @@ static struct {
 	{ "cursor_color", "#FF4500", "The color of the pointer in normal mode (rgba hex value).", OPT_STRING },
 
 	{ "cursor_size", "7", "The height of the pointer in normal mode.", OPT_INT },
+	{ "crosshair_thickness", "5", "The thickness of the crosshair lines in pixels.", OPT_INT },
 	{ "repeat_interval", "20", "The number of milliseconds before repeating a movement event.", OPT_INT },
 	{ "speed", "220", "Pointer speed in pixels/second.", OPT_INT },
 	{ "max_speed", "1600", "The maximum pointer speed.", OPT_INT },

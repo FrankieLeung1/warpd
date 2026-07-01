@@ -7,7 +7,7 @@
 #include "warpd.h"
 #include <stdio.h>
 
-static int cursor_scale = 1;
+static int crosshair_active = 0;
 static uint64_t scale_start_time = 0;
 static uint64_t scale_end_time = 0;
 static int last_segment = -1;
@@ -25,24 +25,32 @@ static void redraw(screen_t scr, int x, int y, int hide_cursor)
 	const char *curcol = config_get("cursor_color");
 	const char *indicator = config_get("indicator");
 	const int normal_cursz = config_get_int("cursor_size");
-	const int cursz = normal_cursz * cursor_scale;
+	const int crosshair_thickness = config_get_int("crosshair_thickness");
 
-	if (cursor_scale > 1) {
+	int show_crosshair = 0;
+	if (crosshair_active) {
 		uint64_t now = get_time_us();
 		if (now < scale_end_time) {
 			uint64_t elapsed = now - scale_start_time;
 			int segment = elapsed / 166666;
 			if (segment % 2 == 0) {
-				hide_cursor = 1;
+				show_crosshair = 1;
 			}
 		}
 	}
 
 	platform->screen_clear(scr);
 
+	if (show_crosshair) {
+		const int cx = x + 1 + normal_cursz / 2;
+		const int cy = y;
+		platform->screen_draw_box(scr, 0, cy - crosshair_thickness / 2, sw, crosshair_thickness, dragging ? "#0000ff" : curcol);
+		platform->screen_draw_box(scr, cx - crosshair_thickness / 2, 0, crosshair_thickness, sh, dragging ? "#0000ff" : curcol);
+	}
+
 	if (!hide_cursor)
-		platform->screen_draw_box(scr, x + 1 + normal_cursz / 2 - cursz / 2, y - cursz / 2, cursz,
-					  cursz, dragging ? "#0000ff" : curcol);
+		platform->screen_draw_box(scr, x + 1, y - normal_cursz / 2, normal_cursz,
+					  normal_cursz, dragging ? "#0000ff" : curcol);
 
 	if (!strcmp(indicator, "bottomleft"))
 		platform->screen_draw_box(scr, gap, sh - indicator_size - gap,
@@ -117,9 +125,9 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 	uint64_t last_blink_update = 0;
 	while (1) {
 		uint64_t now = get_time_us();
-		if (cursor_scale > 1) {
+		if (crosshair_active) {
 			if (now >= scale_end_time) {
-				cursor_scale = 1;
+				crosshair_active = 0;
 				redraw(scr, mx, my, !show_cursor);
 			} else {
 				uint64_t elapsed = now - scale_start_time;
@@ -197,7 +205,7 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 			}
 
 			if (!matched) {
-				cursor_scale = 3;
+				crosshair_active = 1;
 				scale_start_time = get_time_us();
 				scale_end_time = scale_start_time + 1000000;
 				last_segment = 0;

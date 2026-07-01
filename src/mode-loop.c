@@ -33,9 +33,9 @@ int mode_loop(int initial_mode, int oneshot, int record_history)
 			if (history_hint_mode() < 0)
 				goto exit;
 
-			ev = NULL;
-			mode = MODE_NORMAL;
-			break;
+			platform->mouse_click(1);
+			rc = 0;
+			goto exit;
 		case MODE_HINTSPEC:
 			hintspec_mode();
 			break;

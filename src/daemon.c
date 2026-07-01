@@ -67,7 +67,8 @@ void daemon_loop(const char *config_path)
 			full_hint_mode(0);
 			continue;
 		} else if (config_input_match(ev, "history_oneshot_key")) {
-			history_hint_mode();
+			if (history_hint_mode() >= 0)
+				platform->mouse_click(1);
 			continue;
 		}
 
