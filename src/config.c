@@ -39,6 +39,7 @@ static struct {
 	{ "history", ";", "Activate hint history mode while in normal mode.", OPT_KEY },
 	{ "hint", "x", "Activate hint mode while in normal mode (mnemonic: x marks the spot?).", OPT_KEY },
 	{ "hint2", "X", "Activate two pass hint mode.", OPT_KEY },
+	{ "hint_local", "f", "Activate local hint mode centered around the cursor.", OPT_KEY },
 	{ "grid", "g", "Activate (g)rid mode while in normal mode.", OPT_KEY },
 	{ "screen", "s", "Activate (s)creen selection while in normal mode.", OPT_KEY },
 

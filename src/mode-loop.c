@@ -48,6 +48,8 @@ int mode_loop(int initial_mode, int oneshot, int record_history)
 				mode = MODE_HINT;
 			else if (config_input_match(ev, "hint2"))
 				mode = MODE_HINT2;
+			else if (config_input_match(ev, "hint_local"))
+				mode = MODE_HINT_LOCAL;
 			else if (config_input_match(ev, "grid"))
 				mode = MODE_GRID;
 			else if (config_input_match(ev, "screen"))
@@ -64,6 +66,13 @@ int mode_loop(int initial_mode, int oneshot, int record_history)
 		case MODE_HINT2:
 		case MODE_HINT:
 			if (full_hint_mode(mode == MODE_HINT2) < 0)
+				goto exit;
+
+			ev = NULL;
+			mode = MODE_NORMAL;
+			break;
+		case MODE_HINT_LOCAL:
+			if (local_hint_mode() < 0)
 				goto exit;
 
 			ev = NULL;

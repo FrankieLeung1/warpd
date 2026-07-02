@@ -99,7 +99,7 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 	    "accelerator",   "bottom",	     "buttons",
 	    "copy_and_exit", "decelerator",  "down",
 	    "drag",	     "end",	     "exit",
-	    "grid",	     "hint",	     "hint2",
+	    "grid",	     "hint",	     "hint2",        "hint_local",
 	    "hist_back",     "hist_forward", "history",
 	    "left",	     "middle",	     "oneshot_buttons",
 	    "print",	     "right",	     "screen",
@@ -288,7 +288,8 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 			   config_input_match(ev, "screen") ||
 			   config_input_match(ev, "history") ||
 			   config_input_match(ev, "hint2") ||
-			   config_input_match(ev, "hint")) {
+			   config_input_match(ev, "hint") ||
+			   config_input_match(ev, "hint_local")) {
 			goto exit;
 		} else if (config_input_match(ev, "print")) {
 			printf("%d %d %s\n", mx, my, input_event_tostr(ev));

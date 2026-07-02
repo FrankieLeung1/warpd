@@ -323,3 +323,84 @@ int history_hint_mode()
 
 	return hint_selection(scr, hints, n);
 }
+
+int local_hint_mode()
+{
+	int mx, my;
+	screen_t scr;
+	struct hint hints[MAX_HINTS];
+
+	platform->mouse_get_position(&scr, &mx, &my);
+	hist_add(mx, my);
+
+	int sw, sh;
+	int w, h;
+	int i, j;
+	size_t n = 0;
+
+	char chars[256];
+	snprintf(chars, sizeof(chars), "%s,.;/", config_get("hint_chars"));
+	int N = strlen(chars);
+
+	get_hint_size(scr, &w, &h);
+	platform->screen_get_dimensions(scr, &sw, &sh);
+
+	int nc = 0;
+	int nr = 0;
+	while (nc * nr < N) {
+		if (nc <= nr)
+			nc++;
+		else
+			nr++;
+	}
+
+	const int local_w = sw / 4;
+	const int local_h = sh / 4;
+
+	int start_x = mx - sw / 8;
+	int start_y = my - sh / 8;
+
+	if (start_x < 0) start_x = 0;
+	if (start_x + local_w > sw) start_x = sw - local_w;
+	if (start_y < 0) start_y = 0;
+	if (start_y + local_h > sh) start_y = sh - local_h;
+
+	const int colgap = local_w / nc - w;
+	const int rowgap = local_h / nr - h;
+
+	const int x_offset = start_x + (local_w - nc * w - (nc - 1) * colgap) / 2;
+	const int y_offset = start_y + (local_h - nr * h - (nr - 1) * rowgap) / 2;
+
+	int x = x_offset;
+	int y = y_offset;
+
+	for (i = 0; i < nc; i++) {
+		for (j = 0; j < nr; j++) {
+			if ((int)n >= N) break;
+			struct hint *hint = &hints[n];
+
+			hint->x = x;
+			hint->y = y;
+
+			hint->w = w;
+			hint->h = h;
+
+			hint->label[0] = chars[n];
+			hint->label[1] = 0;
+
+			n++;
+			y += rowgap + h;
+		}
+
+		y = y_offset;
+		x += colgap + w;
+	}
+
+	if (n == 0)
+		return -1;
+
+	if (hint_selection(scr, hints, n))
+		return -1;
+
+	return 0;
+}
