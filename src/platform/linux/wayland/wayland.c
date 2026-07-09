@@ -48,6 +48,8 @@ static struct {
 	{"-", "minus"},
 	{"/", "slash"},
 	{";", "semicolon"},
+	{"[", "bracketleft"},
+	{"]", "bracketright"},
 	{"$", "dollar"},
 	{"backspace", "BackSpace"},
 };

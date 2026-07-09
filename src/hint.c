@@ -95,7 +95,7 @@ static size_t generate_fullscreen_hints(screen_t scr, struct hint *hints)
 	return n;
 }
 
-static int hint_selection(screen_t scr, struct hint *_hints, size_t _nr_hints)
+static int hint_selection_ext(screen_t scr, struct hint *_hints, size_t _nr_hints, int is_local)
 {
 	hints = _hints;
 	nr_hints = _nr_hints;
@@ -112,6 +112,8 @@ static int hint_selection(screen_t scr, struct hint *_hints, size_t _nr_hints)
 		"hint_exit",
 		"hint_undo_all",
 		"hint_undo",
+		"hint_local_decrease",
+		"hint_local_increase",
 	};
 
 	config_input_whitelist(keys, sizeof keys / sizeof keys[0]);
@@ -135,6 +137,12 @@ static int hint_selection(screen_t scr, struct hint *_hints, size_t _nr_hints)
 		} else if (config_input_match(ev, "hint_undo")) {
 			if (len)
 				buf[len - 1] = 0;
+		} else if (is_local && config_input_match(ev, "hint_local_decrease")) {
+			rc = -2;
+			break;
+		} else if (is_local && config_input_match(ev, "hint_local_increase")) {
+			rc = -3;
+			break;
 		} else {
 			const char *name = input_event_tostr(ev);
 
@@ -182,6 +190,11 @@ static int hint_selection(screen_t scr, struct hint *_hints, size_t _nr_hints)
 
 	platform->commit();
 	return rc;
+}
+
+static int hint_selection(screen_t scr, struct hint *_hints, size_t _nr_hints)
+{
+	return hint_selection_ext(scr, _hints, _nr_hints, 0);
 }
 
 static int sift()
@@ -324,83 +337,116 @@ int history_hint_mode()
 	return hint_selection(scr, hints, n);
 }
 
+static int load_local_hint_size() {
+	int size = 25; // default 25%
+	const char *path = get_config_path("local_hint_size");
+	FILE *f = fopen(path, "r");
+	if (f) {
+		if (fscanf(f, "%d", &size) != 1) {
+			size = 25;
+		}
+		fclose(f);
+	}
+	if (size < 5) size = 5;
+	if (size > 100) size = 100;
+	return size;
+}
+
+static void save_local_hint_size(int size) {
+	const char *path = get_config_path("local_hint_size");
+	FILE *f = fopen(path, "w");
+	if (f) {
+		fprintf(f, "%d\n", size);
+		fclose(f);
+	}
+}
+
 int local_hint_mode()
 {
 	int mx, my;
 	screen_t scr;
-	struct hint hints[MAX_HINTS];
 
 	platform->mouse_get_position(&scr, &mx, &my);
 	hist_add(mx, my);
 
-	int sw, sh;
-	int w, h;
-	int i, j;
-	size_t n = 0;
+	int size = load_local_hint_size();
 
-	char chars[256];
-	snprintf(chars, sizeof(chars), "%s,.;/", config_get("hint_chars"));
-	int N = strlen(chars);
+	while (1) {
+		struct hint hints[MAX_HINTS];
+		int sw, sh;
+		int w, h;
+		int i, j;
+		size_t n = 0;
 
-	get_hint_size(scr, &w, &h);
-	platform->screen_get_dimensions(scr, &sw, &sh);
+		char chars[256];
+		snprintf(chars, sizeof(chars), "%s,.;/", config_get("hint_chars"));
+		int N = strlen(chars);
 
-	int nc = 0;
-	int nr = 0;
-	while (nc * nr < N) {
-		if (nc <= nr)
-			nc++;
-		else
-			nr++;
-	}
+		get_hint_size(scr, &w, &h);
+		platform->screen_get_dimensions(scr, &sw, &sh);
 
-	const int local_w = sw / 4;
-	const int local_h = sh / 4;
-
-	int start_x = mx - sw / 8;
-	int start_y = my - sh / 8;
-
-	if (start_x < 0) start_x = 0;
-	if (start_x + local_w > sw) start_x = sw - local_w;
-	if (start_y < 0) start_y = 0;
-	if (start_y + local_h > sh) start_y = sh - local_h;
-
-	const int colgap = local_w / nc - w;
-	const int rowgap = local_h / nr - h;
-
-	const int x_offset = start_x + (local_w - nc * w - (nc - 1) * colgap) / 2;
-	const int y_offset = start_y + (local_h - nr * h - (nr - 1) * rowgap) / 2;
-
-	int x = x_offset;
-	int y = y_offset;
-
-	for (i = 0; i < nc; i++) {
-		for (j = 0; j < nr; j++) {
-			if ((int)n >= N) break;
-			struct hint *hint = &hints[n];
-
-			hint->x = x;
-			hint->y = y;
-
-			hint->w = w;
-			hint->h = h;
-
-			hint->label[0] = chars[n];
-			hint->label[1] = 0;
-
-			n++;
-			y += rowgap + h;
+		int nc = 0;
+		int nr = 0;
+		while (nc * nr < N) {
+			if (nc <= nr)
+				nc++;
+			else
+				nr++;
 		}
 
-		y = y_offset;
-		x += colgap + w;
+		const int local_w = sw * size / 100;
+		const int local_h = sh * size / 100;
+
+		int start_x = mx - local_w / 2;
+		int start_y = my - local_h / 2;
+
+		const int colgap = local_w / nc - w;
+		const int rowgap = local_h / nr - h;
+
+		const int x_offset = start_x + (local_w - nc * w - (nc - 1) * colgap) / 2;
+		const int y_offset = start_y + (local_h - nr * h - (nr - 1) * rowgap) / 2;
+
+		int x = x_offset;
+		int y = y_offset;
+
+		for (i = 0; i < nc; i++) {
+			for (j = 0; j < nr; j++) {
+				if ((int)n >= N) break;
+				struct hint *hint = &hints[n];
+
+				hint->x = x;
+				hint->y = y;
+
+				hint->w = w;
+				hint->h = h;
+
+				hint->label[0] = chars[n];
+				hint->label[1] = 0;
+
+				n++;
+				y += rowgap + h;
+			}
+
+			y = y_offset;
+			x += colgap + w;
+		}
+
+		if (n == 0)
+			return -1;
+
+		int rc = hint_selection_ext(scr, hints, n, 1);
+		if (rc == -2) {
+			if (size > 5) {
+				size -= 5;
+				save_local_hint_size(size);
+			}
+		} else if (rc == -3) {
+			if (size < 100) {
+				size += 5;
+				save_local_hint_size(size);
+			}
+		} else {
+			return rc;
+		}
 	}
-
-	if (n == 0)
-		return -1;
-
-	if (hint_selection(scr, hints, n))
-		return -1;
-
-	return 0;
 }

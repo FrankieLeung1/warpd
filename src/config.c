@@ -102,6 +102,8 @@ static struct {
 	{ "hint_exit", "esc", "The exit key used for hint mode.", OPT_KEY },
 	{ "hint_undo", "backspace", "undo last selection step in one of the hint based modes.", OPT_KEY },
 	{ "hint_undo_all", "C-u", "undo all selection steps in one of the hint based modes.", OPT_KEY },
+	{ "hint_local_decrease", "[", "Decrease the local hint size.", OPT_KEY },
+	{ "hint_local_increase", "]", "Increase the local hint size.", OPT_KEY },
 
 	{ "hint2_chars", "hjkl;asdfgqwertyuiopzxcvb", "The character set used for the second hint selection, should consist of at least hint2_grid_size^2 characters.", OPT_STRING },
 	{ "hint2_size", "20", "The size of hints in the secondary grid (range: 1-1000).", OPT_INT },
