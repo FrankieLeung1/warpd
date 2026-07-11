@@ -7,6 +7,8 @@
 #include <dirent.h>
 #include <sys/ioctl.h>
 #include <errno.h>
+#include <sys/wait.h>
+#include <signal.h>
 
 /*
  * evdev definitions. We avoid including <linux/input.h> directly because it
@@ -89,6 +91,37 @@ int nr_keyboards = 0;
 
 static void noop() {}
 
+static pid_t ctrl_pid = 0;
+static pid_t shift_pid = 0;
+static pid_t alt_pid = 0;
+static pid_t meta_pid = 0;
+
+static void sync_virtual_mod(int active, pid_t *pid, const char *mod_name)
+{
+	if (active && *pid == 0) {
+		pid_t child = fork();
+		if (child == 0) {
+			execlp("wtype", "wtype", "-M", mod_name, NULL);
+			exit(1);
+		} else if (child > 0) {
+			*pid = child;
+		}
+	} else if (!active && *pid > 0) {
+		kill(*pid, SIGTERM);
+		int status;
+		waitpid(*pid, &status, 0);
+		*pid = 0;
+	}
+}
+
+static void sync_virtual_mods()
+{
+	sync_virtual_mod(x_active_mods & PLATFORM_MOD_CONTROL, &ctrl_pid, "ctrl");
+	sync_virtual_mod(x_active_mods & PLATFORM_MOD_SHIFT, &shift_pid, "shift");
+	sync_virtual_mod(x_active_mods & PLATFORM_MOD_ALT, &alt_pid, "alt");
+	sync_virtual_mod(x_active_mods & PLATFORM_MOD_META, &meta_pid, "logo");
+}
+
 static void update_mods(uint8_t code, uint8_t pressed)
 {
 	const char *name = way_input_lookup_name(code, 0);
@@ -123,6 +156,8 @@ static void update_mods(uint8_t code, uint8_t pressed)
 		else
 			x_active_mods &= ~PLATFORM_MOD_ALT;
 	}
+
+	sync_virtual_mods();
 }
 
 /*
@@ -471,6 +506,9 @@ void way_input_ungrab_keyboard()
 
 	for (i = 0; i < nr_keyboards; i++)
 		ioctl(keyboard_fds[i], EVIOCGRAB, 0);
+
+	x_active_mods = 0;
+	sync_virtual_mods();
 
 	/*
 	 * Keep fds open so way_input_grab_keyboard() can re-grab them

@@ -346,6 +346,35 @@ int config_input_match(struct input_event *ev, const char *config_key)
 		}
 	}
 
+	for (ent = config; ent; ent = ent->next) {
+		int idx;
+		int exact;
+
+		if (!strcmp(ent->key, config_key) && !strcmp(ent->value, "unbind"))
+			return 0;
+
+		if (ent->whitelisted && (idx = keyidx(ent->value, ev, &exact))) {
+			if (ent->type == OPT_KEY && !exact) {
+				struct config_entry *other;
+				int other_matched_exact = 0;
+				for (other = config; other; other = other->next) {
+					int other_exact;
+					if (other->whitelisted && keyidx(other->value, ev, &other_exact) && other_exact) {
+						other_matched_exact = 1;
+						break;
+					}
+				}
+				if (!other_matched_exact) {
+					if (!strcmp(ent->key, config_key)) {
+						return idx;
+					} else {
+						return 0;
+					}
+				}
+			}
+		}
+	}
+
 	return 0;
 }
 

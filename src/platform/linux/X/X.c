@@ -131,8 +131,41 @@ void x_scroll(int direction)
 	}
 
 	printf("x_scroll %d\n", btn);
+
+	if (x_active_mods & PLATFORM_MOD_SHIFT)
+		XTestFakeKeyEvent(dpy, XKeysymToKeycode(dpy, XK_Shift_L), 1,
+				  CurrentTime);
+	if (x_active_mods & PLATFORM_MOD_CONTROL)
+		XTestFakeKeyEvent(dpy, XKeysymToKeycode(dpy, XK_Control_L), 1,
+				  CurrentTime);
+	if (x_active_mods & PLATFORM_MOD_META)
+		XTestFakeKeyEvent(dpy, XKeysymToKeycode(dpy, XK_Meta_L), 1,
+				  CurrentTime);
+	if (x_active_mods & PLATFORM_MOD_ALT)
+		XTestFakeKeyEvent(dpy, XKeysymToKeycode(dpy, XK_Alt_L), 1,
+				  CurrentTime);
+
+	XSync(dpy, False);
+
 	XTestFakeButtonEvent(dpy, btn, True, CurrentTime);
 	XTestFakeButtonEvent(dpy, btn, False, CurrentTime);
+
+	XSync(dpy, False);
+
+	if (x_active_mods & PLATFORM_MOD_SHIFT)
+		XTestFakeKeyEvent(dpy, XKeysymToKeycode(dpy, XK_Shift_L), 0,
+				  CurrentTime);
+	if (x_active_mods & PLATFORM_MOD_CONTROL)
+		XTestFakeKeyEvent(dpy, XKeysymToKeycode(dpy, XK_Control_L), 0,
+				  CurrentTime);
+	if (x_active_mods & PLATFORM_MOD_META)
+		XTestFakeKeyEvent(dpy, XKeysymToKeycode(dpy, XK_Meta_L), 0,
+				  CurrentTime);
+	if (x_active_mods & PLATFORM_MOD_ALT)
+		XTestFakeKeyEvent(dpy, XKeysymToKeycode(dpy, XK_Alt_L), 0,
+				  CurrentTime);
+
+	XSync(dpy, False);
 }
 
 Window create_window(const char *color)

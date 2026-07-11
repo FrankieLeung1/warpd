@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/wait.h>
 #include "wayland.h"
 
 extern const char *input_event_tostr(struct input_event *ev);
@@ -465,7 +466,17 @@ void way_scroll(int direction)
 	wl_display_flush(wl.dpy);
 }
 
-void way_copy_selection() { /* UNIMPLEMENTED */ }
+void way_copy_selection()
+{
+	pid_t child = fork();
+	if (child == 0) {
+		execlp("wtype", "wtype", "-M", "ctrl", "c", "-m", "ctrl", NULL);
+		exit(1);
+	} else if (child > 0) {
+		int status;
+		waitpid(child, &status, 0);
+	}
+}
 
 /*
  * Global shortcut state for daemon mode (Hyprland only).
