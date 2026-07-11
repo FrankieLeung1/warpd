@@ -117,6 +117,8 @@ int input_eq(struct input_event *ev, const char *str)
 
 	if (ev1.code != ev->code)
 		return 0;
+	else if ((ev1.mods & mods) != ev1.mods)
+		return 0;
 	else if (ev1.mods != mods)
 		return 1;
 	else
