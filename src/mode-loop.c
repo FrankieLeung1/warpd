@@ -9,6 +9,7 @@ int mode_loop(int initial_mode, int oneshot, int record_history)
 	int mode = initial_mode;
 	int rc = 0;
 	struct input_event *ev = NULL;
+	int normal_active = 0;
 
 	if (saved_scr) {
 		int cx, cy;
@@ -30,8 +31,14 @@ int mode_loop(int initial_mode, int oneshot, int record_history)
 
 		switch (mode) {
 		case MODE_HISTORY:
-			if (history_hint_mode() < 0)
+			if (history_hint_mode() < 0) {
+				if (normal_active) {
+					ev = NULL;
+					mode = MODE_NORMAL;
+					break;
+				}
 				goto exit;
+			}
 
 			platform->mouse_click(1);
 			rc = 0;
@@ -40,6 +47,7 @@ int mode_loop(int initial_mode, int oneshot, int record_history)
 			hintspec_mode();
 			break;
 		case MODE_NORMAL:
+			normal_active = 1;
 			ev = normal_mode(ev, oneshot);
 
 			if (config_input_match(ev, "history"))
@@ -65,15 +73,27 @@ int mode_loop(int initial_mode, int oneshot, int record_history)
 			break;
 		case MODE_HINT2:
 		case MODE_HINT:
-			if (full_hint_mode(mode == MODE_HINT2) < 0)
+			if (full_hint_mode(mode == MODE_HINT2) < 0) {
+				if (normal_active) {
+					ev = NULL;
+					mode = MODE_NORMAL;
+					break;
+				}
 				goto exit;
+			}
 
 			ev = NULL;
 			mode = MODE_NORMAL;
 			break;
 		case MODE_HINT_LOCAL:
-			if (local_hint_mode() < 0)
+			if (local_hint_mode() < 0) {
+				if (normal_active) {
+					ev = NULL;
+					mode = MODE_NORMAL;
+					break;
+				}
 				goto exit;
+			}
 
 			ev = NULL;
 			mode = MODE_NORMAL;

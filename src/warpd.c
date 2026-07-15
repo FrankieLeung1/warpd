@@ -305,7 +305,7 @@ int main(int argc, char *argv[])
 	int c;
 	int foreground = 0;
 
-	config_path = get_config_path("config");
+	config_path = strdup(get_config_path("config"));
 
 	struct option opts[] = {
 		{"version", no_argument, NULL, 'v'},
