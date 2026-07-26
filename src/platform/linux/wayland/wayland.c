@@ -454,6 +454,12 @@ void way_scroll(int direction)
 		axis = 1;
 		discrete = -1;
 		break;
+	case SCROLL_STOP:
+		zwlr_virtual_pointer_v1_axis_source(wl.ptr, 0);
+		zwlr_virtual_pointer_v1_axis_stop(wl.ptr, get_time_msec(), axis);
+		zwlr_virtual_pointer_v1_frame(wl.ptr);
+		wl_display_flush(wl.dpy);
+		return;
 	default:
 		return;
 	}

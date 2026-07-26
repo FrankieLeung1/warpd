@@ -49,6 +49,11 @@ void scroll_tick()
 	v += a * (t / 1000);
 
 	if (v < 0) {
+		if (traveled > 0)
+		{
+			platform->scroll(SCROLL_STOP);
+		}
+
 		v = 0;
 		d = 0;
 		traveled = 0;
@@ -72,6 +77,8 @@ void scroll_stop()
 {
 	if (v > 0 && platform->input_resume_keyboard)
 		platform->input_resume_keyboard();
+
+	platform->scroll(SCROLL_STOP);
 
 	v = 0;
 	a = 0;

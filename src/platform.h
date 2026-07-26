@@ -15,6 +15,7 @@
 #define PLATFORM_MOD_META 4
 #define PLATFORM_MOD_ALT 8
 
+#define SCROLL_STOP 0
 #define SCROLL_DOWN 1
 #define SCROLL_RIGHT 2
 #define SCROLL_LEFT 3
