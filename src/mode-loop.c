@@ -31,7 +31,11 @@ int mode_loop(int initial_mode, int oneshot, int record_history)
 
 		switch (mode) {
 		case MODE_HISTORY:
-			if (history_hint_mode() < 0) {
+			rc = history_hint_mode();
+			if (rc == -4) {
+				mode = MODE_HINT;
+				break;
+			} else if (rc < 0) {
 				if (normal_active) {
 					ev = NULL;
 					mode = MODE_NORMAL;
@@ -73,7 +77,11 @@ int mode_loop(int initial_mode, int oneshot, int record_history)
 			break;
 		case MODE_HINT2:
 		case MODE_HINT:
-			if (full_hint_mode(mode == MODE_HINT2) < 0) {
+			rc = full_hint_mode(mode == MODE_HINT2);
+			if (rc == -4) {
+				mode = MODE_HISTORY;
+				break;
+			} else if (rc < 0) {
 				if (normal_active) {
 					ev = NULL;
 					mode = MODE_NORMAL;

@@ -102,6 +102,7 @@ static struct {
 	{ "hint_exit", "esc", "The exit key used for hint mode.", OPT_KEY },
 	{ "hint_undo", "backspace", "undo last selection step in one of the hint based modes.", OPT_KEY },
 	{ "hint_undo_all", "C-u", "undo all selection steps in one of the hint based modes.", OPT_KEY },
+	{ "hint_history", "space", "Toggle into history mode while in hint mode.", OPT_KEY },
 	{ "hint_local_decrease", "[", "Decrease the local hint size.", OPT_KEY },
 	{ "hint_local_increase", "]", "Increase the local hint size.", OPT_KEY },
 

@@ -112,6 +112,7 @@ static int hint_selection_ext(screen_t scr, struct hint *_hints, size_t _nr_hint
 		"hint_exit",
 		"hint_undo_all",
 		"hint_undo",
+		"hint_history",
 		"hint_local_decrease",
 		"hint_local_increase",
 	};
@@ -137,6 +138,9 @@ static int hint_selection_ext(screen_t scr, struct hint *_hints, size_t _nr_hint
 		} else if (config_input_match(ev, "hint_undo")) {
 			if (len)
 				buf[len - 1] = 0;
+		} else if (config_input_match(ev, "hint_history")) {
+			rc = -4;
+			break;
 		} else if (is_local && config_input_match(ev, "hint_local_decrease")) {
 			rc = -2;
 			break;
@@ -146,7 +150,7 @@ static int hint_selection_ext(screen_t scr, struct hint *_hints, size_t _nr_hint
 		} else {
 			const char *name = input_event_tostr(ev);
 
-			if (!name || name[1])
+			if (!name || name[1] || !strcmp(name, "space"))
 				continue;
 
 			buf[len++] = name[0];
@@ -298,8 +302,9 @@ int full_hint_mode(int second_pass)
 	if (nr_hints == 0)
 		return -1;
 
-	if (hint_selection(scr, hints, nr_hints))
-		return -1;
+	int rc = hint_selection(scr, hints, nr_hints);
+	if (rc)
+		return rc;
 
 	if (second_pass)
 		return sift();

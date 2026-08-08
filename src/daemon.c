@@ -61,13 +61,21 @@ void daemon_loop(const char *config_path)
 		else if (config_input_match(ev, "history_activation_key"))
 			mode = MODE_HISTORY;
 		else if (config_input_match(ev, "hint2_oneshot_key")) {
-			full_hint_mode(1);
+			if (full_hint_mode(1) == -4) {
+				if (history_hint_mode() >= 0)
+					platform->mouse_click(1);
+			}
 			continue;
 		} else if (config_input_match(ev, "hint_oneshot_key")) {
-			full_hint_mode(0);
+			if (full_hint_mode(0) == -4) {
+				if (history_hint_mode() >= 0)
+					platform->mouse_click(1);
+			}
 			continue;
 		} else if (config_input_match(ev, "history_oneshot_key")) {
-			if (history_hint_mode() >= 0)
+			if (history_hint_mode() == -4)
+				full_hint_mode(0);
+			else
 				platform->mouse_click(1);
 			continue;
 		}

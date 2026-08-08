@@ -54,6 +54,7 @@ static struct {
 	{"]", "bracketright"},
 	{"$", "dollar"},
 	{"backspace", "BackSpace"},
+	{"space", "space"},
 };
 
 struct ptr ptr = {-1, -1, NULL};
