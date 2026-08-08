@@ -92,6 +92,11 @@ struct surface *create_surface(struct screen *scr, int x, int y, int w, int h, i
 	pw = (w * s120 + 119) / 120;
 	ph = (h * s120 + 119) / 120;
 
+	if (px + pw > scr->pw)
+		pw = scr->pw - px;
+	if (py + ph > scr->ph)
+		ph = scr->ph - py;
+
 	sfc->wl_buffer = wl_shm_pool_create_buffer(scr->wl_pool, py*scr->stride + px*4, pw, ph, scr->stride, WL_SHM_FORMAT_ARGB8888);
 	assert(sfc->wl_buffer);
 	sfc->wl_surface = wl_compositor_create_surface(wl.compositor);

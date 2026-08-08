@@ -4,6 +4,7 @@
  * © 2019 Raheman Vaiya (see: LICENSE).
  */
 
+#include "platform.h"
 #include "warpd.h"
 #include <stdio.h>
 
@@ -73,6 +74,9 @@ static void redraw(screen_t scr, int x, int y, int hide_cursor)
 
 static void move(screen_t scr, int x, int y, int hide_cursor)
 {
+	scroll_stop();
+	platform->scroll(SCROLL_STOP);
+
 	platform->mouse_move(scr, x, y);
 	redraw(scr, x, y, hide_cursor);
 }
