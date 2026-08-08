@@ -40,7 +40,7 @@ void scroll_tick()
 	/* Non zero to provide the illusion of continuous scrolling */
 
 	const float t =
-	    (float)(get_time_us() / 1000 -
+	    ((float)get_time_us() / 1000 -
 		    last_tick); // time elapsed since last tick in ms
 	last_tick = get_time_us() / 1000;
 
@@ -49,8 +49,7 @@ void scroll_tick()
 	v += a * (t / 1000);
 
 	if (v < 0) {
-		if (traveled > 0)
-		{
+		if (traveled > 0) {
 			platform->scroll(SCROLL_STOP);
 		}
 
@@ -78,7 +77,8 @@ void scroll_stop()
 	if (v > 0 && platform->input_resume_keyboard)
 		platform->input_resume_keyboard();
 
-	platform->scroll(SCROLL_STOP);
+	if (traveled > 0)
+		platform->scroll(SCROLL_STOP);
 
 	v = 0;
 	a = 0;

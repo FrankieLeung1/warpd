@@ -12,6 +12,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/wait.h>
+#include <unistd.h>
 #include "wayland.h"
 
 extern const char *input_event_tostr(struct input_event *ev);
@@ -455,7 +456,7 @@ void way_scroll(int direction)
 		discrete = -1;
 		break;
 	case SCROLL_STOP:
-		zwlr_virtual_pointer_v1_axis_source(wl.ptr, 0);
+		zwlr_virtual_pointer_v1_axis_source(wl.ptr, WL_POINTER_AXIS_SOURCE_CONTINUOUS);
 		zwlr_virtual_pointer_v1_axis_stop(wl.ptr, get_time_msec(), axis);
 		zwlr_virtual_pointer_v1_frame(wl.ptr);
 		wl_display_flush(wl.dpy);
@@ -465,8 +466,8 @@ void way_scroll(int direction)
 	}
 
 	uint32_t t = get_time_msec();
-	zwlr_virtual_pointer_v1_axis_source(wl.ptr, 0); // WL_POINTER_AXIS_SOURCE_WHEEL
-	zwlr_virtual_pointer_v1_axis_discrete(wl.ptr, t, axis, wl_fixed_from_int(15 * discrete), discrete);
+	zwlr_virtual_pointer_v1_axis_source(wl.ptr, WL_POINTER_AXIS_SOURCE_CONTINUOUS);
+	zwlr_virtual_pointer_v1_axis(wl.ptr, t, axis, wl_fixed_from_int(15 * discrete));
 	zwlr_virtual_pointer_v1_frame(wl.ptr);
 
 	wl_display_flush(wl.dpy);
