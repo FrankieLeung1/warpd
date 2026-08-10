@@ -106,6 +106,10 @@ static struct {
 	{ "hint_local_decrease", "[", "Decrease the local hint size.", OPT_KEY },
 	{ "hint_local_increase", "]", "Increase the local hint size.", OPT_KEY },
 
+	{ "history_box", "1", "Draw history location boxes in hint mode.", OPT_INT },
+	{ "history_box_color", "#00ffff", "Color of history location boxes in hint mode.", OPT_STRING },
+	{ "history_box_opacity", "10", "Opacity (0-100) of history location boxes in hint mode.", OPT_INT },
+
 	{ "hint2_chars", "hjkl;asdfgqwertyuiopzxcvb", "The character set used for the second hint selection, should consist of at least hint2_grid_size^2 characters.", OPT_STRING },
 	{ "hint2_size", "20", "The size of hints in the secondary grid (range: 1-1000).", OPT_INT },
 	{ "hint2_gap_size", "1", "The spacing between hints in the secondary grid. (range: 1-1000)", OPT_INT },

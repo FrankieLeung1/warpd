@@ -14,6 +14,8 @@ static size_t nr_matched;
 
 char last_selected_hint[32];
 
+static int draw_history_boxes = 1;
+
 static void filter(screen_t scr, const char *s)
 {
 	size_t i;
@@ -26,6 +28,37 @@ static void filter(screen_t scr, const char *s)
 
 	platform->screen_clear(scr);
 	platform->hint_draw(scr, matched, nr_matched);
+
+	if (nr_matched == nr_hints && draw_history_boxes && config_get_int("history_box")) {
+		struct histfile_ent *ents;
+		size_t n_ents = histfile_read(&ents);
+		const char *color_str = config_get("history_box_color");
+		int opacity = config_get_int("history_box_opacity");
+		if (opacity < 0) opacity = 0;
+		if (opacity > 100) opacity = 100;
+		int alpha = (opacity * 255) / 100;
+
+		int border_opacity = opacity * 6;
+		if (border_opacity > 100) border_opacity = 100;
+		int border_alpha = (border_opacity * 255) / 100;
+
+		char hex_color[16];
+		const char *c = (color_str[0] == '#') ? color_str + 1 : color_str;
+		snprintf(hex_color, sizeof(hex_color), "#%.6s%02x", c, alpha);
+
+		char white_border[16];
+		snprintf(white_border, sizeof(white_border), "#ffffff%02x", border_alpha);
+
+		for (i = 0; i < n_ents; i++) {
+			int radius = 3;
+			int border = 2;
+			/* Draw white border */
+			platform->screen_draw_box(scr, ents[i].x - radius - border, ents[i].y - radius - border, (radius + border) * 2, (radius + border) * 2, white_border);
+			/* Draw inner box */
+			platform->screen_draw_box(scr, ents[i].x - radius, ents[i].y - radius, radius * 2, radius * 2, hex_color);
+		}
+	}
+
 	platform->commit();
 }
 
@@ -339,7 +372,10 @@ int history_hint_mode()
 		hints[i].label[1] = 0;
 	}
 
-	return hint_selection(scr, hints, n);
+	draw_history_boxes = 0;
+	int rc = hint_selection(scr, hints, n);
+	draw_history_boxes = 1;
+	return rc;
 }
 
 static int load_local_hint_size() {
