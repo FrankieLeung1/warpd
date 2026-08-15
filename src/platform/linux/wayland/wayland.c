@@ -686,6 +686,8 @@ void way_commit() { }
 
 static void cleanup()
 {
+	way_input_ungrab_keyboard();
+
 	if (!wl.dpy)
 		return;
 

@@ -85,6 +85,7 @@ void way_init()
 	wl_registry_add_listener(wl_display_get_registry(wl.dpy), &registry_listener, NULL);
 
 	wl_display_dispatch(wl.dpy);
+	wl_display_roundtrip(wl.dpy);
 
 	if (!wl.ptr) {
 		fprintf(stderr, "Could not create virtual pointer (virtual pointer unsupported?)\n");

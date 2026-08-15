@@ -91,66 +91,70 @@ int nr_keyboards = 0;
 
 static void noop() {}
 
-static pid_t ctrl_pid = 0;
-static pid_t shift_pid = 0;
-static pid_t alt_pid = 0;
-static pid_t meta_pid = 0;
+static int ctrl_active = 0;
+static int shift_active = 0;
+static int alt_active = 0;
+static int meta_active = 0;
 
-static void sync_virtual_mod(int active, pid_t *pid, const char *mod_name)
+static void sync_virtual_mod(int active, int *state, const char *mod_name)
 {
-	if (active && *pid == 0) {
+	if (active && !*state) {
 		pid_t child = fork();
 		if (child == 0) {
 			execlp("wtype", "wtype", "-M", mod_name, NULL);
 			exit(1);
 		} else if (child > 0) {
-			*pid = child;
+			int status;
+			waitpid(child, &status, 0);
+			*state = 1;
 		}
-	} else if (!active && *pid > 0) {
-		kill(*pid, SIGTERM);
-		int status;
-		waitpid(*pid, &status, 0);
-		*pid = 0;
+	} else if (!active && *state) {
+		pid_t child = fork();
+		if (child == 0) {
+			execlp("wtype", "wtype", "-m", mod_name, NULL);
+			exit(1);
+		} else if (child > 0) {
+			int status;
+			waitpid(child, &status, 0);
+			*state = 0;
+		}
 	}
 }
 
 static void sync_virtual_mods()
 {
-	sync_virtual_mod(x_active_mods & PLATFORM_MOD_CONTROL, &ctrl_pid, "ctrl");
-	sync_virtual_mod(x_active_mods & PLATFORM_MOD_SHIFT, &shift_pid, "shift");
-	sync_virtual_mod(x_active_mods & PLATFORM_MOD_ALT, &alt_pid, "alt");
-	sync_virtual_mod(x_active_mods & PLATFORM_MOD_META, &meta_pid, "logo");
+	sync_virtual_mod(x_active_mods & PLATFORM_MOD_CONTROL, &ctrl_active, "ctrl");
+	sync_virtual_mod(x_active_mods & PLATFORM_MOD_SHIFT, &shift_active, "shift");
+	sync_virtual_mod(x_active_mods & PLATFORM_MOD_ALT, &alt_active, "alt");
+	sync_virtual_mod(x_active_mods & PLATFORM_MOD_META, &meta_active, "logo");
 }
 
 static void update_mods(uint8_t code, uint8_t pressed)
 {
 	const char *name = way_input_lookup_name(code, 0);
 
-	if (!name)
-		return;
-
-	if (strstr(name, "Control") == name) {
+	if (code == KEY_LEFTCTRL || code == KEY_RIGHTCTRL ||
+	    (name && (strstr(name, "Control") || strstr(name, "Ctrl")))) {
 		if (pressed)
 			x_active_mods |= PLATFORM_MOD_CONTROL;
 		else
 			x_active_mods &= ~PLATFORM_MOD_CONTROL;
-	}
-
-	if (strstr(name, "Shift") == name) {
+	} else if (code == KEY_LEFTSHIFT || code == KEY_RIGHTSHIFT ||
+		   (name && strstr(name, "Shift"))) {
 		if (pressed)
 			x_active_mods |= PLATFORM_MOD_SHIFT;
 		else
 			x_active_mods &= ~PLATFORM_MOD_SHIFT;
-	}
-
-	if (strstr(name, "Super") == name) {
+	} else if (code == KEY_LEFTMETA || code == KEY_RIGHTMETA ||
+		   (name && (strstr(name, "Super") || strstr(name, "Meta") ||
+			     strstr(name, "Hyper") || strstr(name, "Win")))) {
 		if (pressed)
 			x_active_mods |= PLATFORM_MOD_META;
 		else
 			x_active_mods &= ~PLATFORM_MOD_META;
-	}
-
-	if (strstr(name, "Alt") == name) {
+	} else if (code == KEY_LEFTALT || code == KEY_RIGHTALT ||
+		   (name && (strstr(name, "Alt") || strstr(name, "ISO_Level3_Shift") ||
+			     strstr(name, "Mode_switch")))) {
 		if (pressed)
 			x_active_mods |= PLATFORM_MOD_ALT;
 		else
@@ -224,6 +228,15 @@ static void handle_key(void *data,
 	(void)wl_keyboard;
 	(void)serial;
 	(void)time;
+
+	/*
+	 * When evdev keyboards are grabbed, the raw evdev loop is the sole
+	 * authoritative event source. Accepting events here too would cause
+	 * every keypress to be enqueued twice (and update_mods called twice),
+	 * producing double modifier emissions and broken release tracking.
+	 */
+	if (nr_keyboards > 0)
+		return;
 
 	/* value: 0=released, 1=pressed */
 	update_mods(key, state);
@@ -414,6 +427,7 @@ void way_input_grab_keyboard()
 	 */
 	if (prev_keyboards > 0 && nr_keyboards == prev_keyboards) {
 		x_active_mods = 0;
+		sync_virtual_mods();
 		return;
 	}
 
@@ -430,6 +444,7 @@ void way_input_grab_keyboard()
 			fprintf(stderr, "WARNING: Cannot open /dev/input. Falling back to Wayland key events (requires window focus).\n");
 		}
 		x_active_mods = 0;
+		sync_virtual_mods();
 		return;
 	}
 
@@ -488,6 +503,7 @@ void way_input_grab_keyboard()
 	}
 
 	x_active_mods = 0;
+	sync_virtual_mods();
 }
 
 void way_input_suspend_keyboard()
