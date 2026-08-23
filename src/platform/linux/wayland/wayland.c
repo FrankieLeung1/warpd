@@ -479,7 +479,7 @@ void way_copy_selection()
 	pid_t child = fork();
 	if (child == 0) {
 		execlp("wtype", "wtype", "-M", "ctrl", "c", "-m", "ctrl", NULL);
-		exit(1);
+		_exit(1);
 	} else if (child > 0) {
 		int status;
 		waitpid(child, &status, 0);
@@ -730,12 +730,42 @@ static void sig_handler(int sig)
 	exit(0);
 }
 
+static int has_command(const char *cmd)
+{
+	const char *path_env = getenv("PATH");
+	if (!path_env)
+		return 0;
+
+	char *path_copy = strdup(path_env);
+	if (!path_copy)
+		return 0;
+
+	char *token = strtok(path_copy, ":");
+	char full_path[PATH_MAX];
+	int found = 0;
+
+	while (token) {
+		snprintf(full_path, sizeof full_path, "%s/%s", token, cmd);
+		if (access(full_path, X_OK) == 0) {
+			found = 1;
+			break;
+		}
+		token = strtok(NULL, ":");
+	}
+
+	free(path_copy);
+	return found;
+}
+
 void wayland_init(struct platform *platform)
 {
 	is_hyprland = getenv("HYPRLAND_INSTANCE_SIGNATURE") != NULL;
 
 	if (is_hyprland)
 		hyprland_ipc_init();
+
+	if (!has_command("wtype"))
+		fprintf(stderr, "WARNING: wtype is not installed or not in PATH. Virtual modifier synchronization and copy selection will not work.\n");
 
 	signal(SIGINT, sig_handler);
 	signal(SIGTERM, sig_handler);

@@ -102,21 +102,23 @@ static void sync_virtual_mod(int active, int *state, const char *mod_name)
 		pid_t child = fork();
 		if (child == 0) {
 			execlp("wtype", "wtype", "-M", mod_name, NULL);
-			exit(1);
+			_exit(1);
 		} else if (child > 0) {
 			int status;
 			waitpid(child, &status, 0);
-			*state = 1;
+			if (WIFEXITED(status) && WEXITSTATUS(status) == 0)
+				*state = 1;
 		}
 	} else if (!active && *state) {
 		pid_t child = fork();
 		if (child == 0) {
 			execlp("wtype", "wtype", "-m", mod_name, NULL);
-			exit(1);
+			_exit(1);
 		} else if (child > 0) {
 			int status;
 			waitpid(child, &status, 0);
-			*state = 0;
+			if (WIFEXITED(status) && WEXITSTATUS(status) == 0)
+				*state = 0;
 		}
 	}
 }
