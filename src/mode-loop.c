@@ -45,8 +45,7 @@ int mode_loop(int initial_mode, int oneshot, int record_history)
 			}
 
 			platform->mouse_click(1);
-			rc = 0;
-			goto exit;
+			break;
 		case MODE_HINTSPEC:
 			hintspec_mode();
 			break;
