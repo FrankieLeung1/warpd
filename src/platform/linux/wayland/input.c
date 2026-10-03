@@ -746,6 +746,9 @@ void way_input_grab_keyboard()
 	char path[512];
 	int i, j;
 
+	if (keyboards_grabbed)
+		return;
+
 	kanata_change_layer("warpd-active");
 
 	init_inotify_if_needed();
@@ -894,6 +897,9 @@ void way_input_resume_keyboard()
 void way_input_ungrab_keyboard()
 {
 	int i;
+
+	if (!keyboards_grabbed)
+		return;
 
 	keyboards_grabbed = 0;
 

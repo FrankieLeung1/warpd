@@ -120,8 +120,6 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 
 	mouse_reset();
 	redraw(scr, mx, my, !show_cursor);
-
-	platform->input_grab_keyboard();
 	// printf("start normal \n");
 
 	uint64_t time = 0;
@@ -347,8 +345,6 @@ exit:
 	}
 
 	platform->screen_clear(scr);
-
-	platform->input_ungrab_keyboard();
 
 	platform->commit();
 	// printf("end normal \n");

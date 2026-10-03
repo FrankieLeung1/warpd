@@ -11,6 +11,8 @@ int mode_loop(int initial_mode, int oneshot, int record_history)
 	struct input_event *ev = NULL;
 	int normal_active = 0;
 
+	platform->input_grab_keyboard();
+
 	if (saved_scr) {
 		int cx, cy;
 		platform->mouse_get_position(NULL, &cx, &cy);
@@ -133,6 +135,7 @@ int mode_loop(int initial_mode, int oneshot, int record_history)
 			else
 				printf("%d %d\n", x, y);
 
+			platform->input_ungrab_keyboard();
 			return btn;
 		}
 	}
@@ -143,6 +146,7 @@ exit:
 		platform->mouse_move(saved_scr, -1, -1);
 	}
 	platform->mouse_hide();
+	platform->input_ungrab_keyboard();
 	return rc;
 }
 

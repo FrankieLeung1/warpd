@@ -137,7 +137,6 @@ static int hint_selection_ext(screen_t scr, struct hint *_hints, size_t _nr_hint
 
 	int rc = 0;
 	char buf[32] = {0};
-	platform->input_grab_keyboard();
 
 	platform->mouse_hide();
 
@@ -221,7 +220,6 @@ static int hint_selection_ext(screen_t scr, struct hint *_hints, size_t _nr_hint
 		}
 	}
 
-	platform->input_ungrab_keyboard();
 	platform->screen_clear(scr);
 
 	platform->commit();

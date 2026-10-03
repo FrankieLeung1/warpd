@@ -97,8 +97,6 @@ struct input_event *grid_mode()
 	platform->mouse_move(scr, mx, my);
 	redraw(mx, my, 1);
 
-	platform->input_grab_keyboard();
-
 	const char *keys[] = {
 		"grid_up",
 		"grid_down",
@@ -200,8 +198,6 @@ struct input_event *grid_mode()
 exit:
 	config_input_whitelist(NULL, 0);
 	platform->screen_clear(scr);
-
-	platform->input_ungrab_keyboard();
 
 	platform->commit();
 	return ev;
