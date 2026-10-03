@@ -9,6 +9,54 @@
 #include <errno.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <sys/inotify.h>
+#include <time.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+static void kanata_change_layer(const char *layer)
+{
+	int port = 10000;
+	const char *port_env = getenv("KANATA_PORT");
+	if (port_env && atoi(port_env) > 0)
+		port = atoi(port_env);
+
+	int sock = socket(AF_INET, SOCK_STREAM, 0);
+	if (sock < 0)
+		return;
+
+	struct sockaddr_in addr;
+	memset(&addr, 0, sizeof addr);
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(port);
+	inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+
+	struct timeval tv;
+	tv.tv_sec = 0;
+	tv.tv_usec = 20000; /* 20ms timeout */
+	setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+	setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+
+	if (connect(sock, (struct sockaddr *)&addr, sizeof addr) == 0) {
+		char msg[128];
+		int len = snprintf(msg, sizeof msg, "{\"ChangeLayer\":{\"new\":\"%s\"}}\n", layer);
+		if (write(sock, msg, len) > 0) {
+			fprintf(stderr, "[warpd] Switched kanata layer to: %s\n", layer);
+		}
+		shutdown(sock, SHUT_WR);
+		char dummy[128];
+		while (read(sock, dummy, sizeof dummy) > 0) {}
+	}
+	close(sock);
+}
+
+static uint64_t get_time_ms(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
 
 /*
  * evdev definitions. We avoid including <linux/input.h> directly because it
@@ -86,8 +134,24 @@ static uint8_t x_active_mods = 0;
 struct keymap_entry keymap[256] = {0};
 
 static int keyboard_fds[MAX_KEYBOARDS];
-static char keyboard_names[MAX_KEYBOARDS][32];
+static char keyboard_names[MAX_KEYBOARDS][64];
 int nr_keyboards = 0;
+
+struct busy_keyboard {
+	char name[64];
+	int fd;
+};
+
+static struct busy_keyboard busy_keyboards[MAX_KEYBOARDS];
+static int nr_busy_keyboards = 0;
+static int keyboards_grabbed = 0;
+
+static int mouse_fds[MAX_MICE];
+static char mouse_names[MAX_MICE][64];
+static int nr_mice = 0;
+
+static int input_inotify_fd = -1;
+static int input_inotify_wd = -1;
 
 static void noop() {}
 
@@ -260,10 +324,39 @@ static struct wl_keyboard_listener wl_keyboard_listener = {
 	.repeat_info = noop,
 };
 
+static void init_inotify_if_needed()
+{
+	if (input_inotify_fd < 0) {
+		input_inotify_fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+		if (input_inotify_fd >= 0) {
+			input_inotify_wd = inotify_add_watch(input_inotify_fd, "/dev/input",
+							     IN_CREATE | IN_DELETE | IN_ATTRIB);
+			if (input_inotify_wd < 0) {
+				fprintf(stderr, "[warpd debug] Failed to watch /dev/input: %s\n", strerror(errno));
+			} else {
+				fprintf(stderr, "[warpd debug] Watching /dev/input for device hotplug/changes\n");
+			}
+		} else {
+			fprintf(stderr, "[warpd debug] Failed to init inotify: %s\n", strerror(errno));
+		}
+	}
+}
+
+int way_input_get_inotify_fd()
+{
+	init_inotify_if_needed();
+	return input_inotify_fd;
+}
+
 static int is_mouse(int fd)
 {
 	unsigned long evbit[(EV_MAX / (8 * sizeof(long)) + 1)];
 	unsigned long relbit[(REL_MAX / (8 * sizeof(long)) + 1)];
+	char dev_name[256] = "Unknown";
+
+	ioctl(fd, EVIOCGNAME(sizeof dev_name), dev_name);
+	if (strcasecmp(dev_name, "kanata") == 0 || strcasecmp(dev_name, "kmonad") == 0)
+		return 0;
 
 	memset(evbit, 0, sizeof evbit);
 	memset(relbit, 0, sizeof relbit);
@@ -307,8 +400,11 @@ static int is_keyboard(int fd)
 		return 0;
 	}
 
-	/* Ignore devices with relative X/Y axes (mice) */
-	if (evbit[0] & (1UL << EV_REL)) {
+	int is_explicit_virtual_kbd = (strcasecmp(dev_name, "kanata") == 0 ||
+				       strcasecmp(dev_name, "kmonad") == 0);
+
+	/* Ignore devices with relative X/Y axes (mice), unless known virtual keyboard */
+	if (!is_explicit_virtual_kbd && (evbit[0] & (1UL << EV_REL))) {
 		if (ioctl(fd, EVIOCGBIT(EV_REL, sizeof relbit), relbit) >= 0) {
 			if ((relbit[REL_X / (8 * sizeof(long))] & (1UL << (REL_X % (8 * sizeof(long))))) &&
 			    (relbit[REL_Y / (8 * sizeof(long))] & (1UL << (REL_Y % (8 * sizeof(long)))))) {
@@ -318,8 +414,8 @@ static int is_keyboard(int fd)
 		}
 	}
 
-	/* Ignore devices with absolute X/Y axes (touchpads/joysticks) */
-	if (evbit[0] & (1UL << EV_ABS)) {
+	/* Ignore devices with absolute X/Y axes (touchpads/joysticks), unless known virtual keyboard */
+	if (!is_explicit_virtual_kbd && (evbit[0] & (1UL << EV_ABS))) {
 		if (ioctl(fd, EVIOCGBIT(EV_ABS, sizeof absbit), absbit) >= 0) {
 			if ((absbit[ABS_X / (8 * sizeof(long))] & (1UL << (ABS_X % (8 * sizeof(long))))) &&
 			    (absbit[ABS_Y / (8 * sizeof(long))] & (1UL << (ABS_Y % (8 * sizeof(long)))))) {
@@ -389,119 +485,396 @@ void way_input_release_keys(int fd)
 	}
 }
 
+static void remove_keyboard_at(int idx)
+{
+	if (idx < 0 || idx >= nr_keyboards)
+		return;
+
+	fprintf(stderr, "[warpd] Device removed: keyboard %s (fd %d)\n",
+		keyboard_names[idx], keyboard_fds[idx]);
+
+	ioctl(keyboard_fds[idx], EVIOCGRAB, 0);
+	close(keyboard_fds[idx]);
+
+	for (int i = idx; i < nr_keyboards - 1; i++) {
+		keyboard_fds[i] = keyboard_fds[i + 1];
+		memcpy(keyboard_names[i], keyboard_names[i + 1], sizeof(keyboard_names[i]));
+	}
+	nr_keyboards--;
+
+	if (nr_keyboards == 0) {
+		x_active_mods = 0;
+		sync_virtual_mods();
+	}
+}
+
+static void remove_busy_keyboard_at(int idx)
+{
+	if (idx < 0 || idx >= nr_busy_keyboards)
+		return;
+
+	fprintf(stderr, "[warpd] Device removed: busy keyboard %s (fd %d)\n",
+		busy_keyboards[idx].name, busy_keyboards[idx].fd);
+
+	close(busy_keyboards[idx].fd);
+	for (int i = idx; i < nr_busy_keyboards - 1; i++) {
+		busy_keyboards[i] = busy_keyboards[i + 1];
+	}
+	nr_busy_keyboards--;
+}
+
+static int has_kanata_keyboard(void)
+{
+	for (int i = 0; i < nr_keyboards; i++) {
+		char name[256] = "";
+		ioctl(keyboard_fds[i], EVIOCGNAME(sizeof name), name);
+		if (strcasecmp(name, "kanata") == 0)
+			return 1;
+	}
+	return 0;
+}
+
+static int try_grab_fd(int fd, const char *dev_name, const char *path)
+{
+	if (nr_keyboards >= MAX_KEYBOARDS)
+		return -1;
+
+	char name[256] = "";
+	ioctl(fd, EVIOCGNAME(sizeof name), name);
+
+	way_input_release_keys(fd);
+
+	if (ioctl(fd, EVIOCGRAB, 1) < 0) {
+		if (errno == EBUSY) {
+			if (has_kanata_keyboard()) {
+				fprintf(stderr, "[warpd] %s (%s): Device busy (managed by kanata); skipping\n",
+					path ? path : dev_name, name);
+				close(fd);
+				return 0;
+			}
+			fprintf(stderr, "[warpd] %s (%s): Device busy; queued for retry\n",
+				path ? path : dev_name, name);
+			if (nr_busy_keyboards < MAX_KEYBOARDS) {
+				for (int i = 0; i < nr_busy_keyboards; i++) {
+					if (!strcmp(busy_keyboards[i].name, dev_name))
+						return 0;
+				}
+				busy_keyboards[nr_busy_keyboards].fd = fd;
+				snprintf(busy_keyboards[nr_busy_keyboards].name,
+					 sizeof(busy_keyboards[nr_busy_keyboards].name),
+					 "%s", dev_name);
+				nr_busy_keyboards++;
+				return 0;
+			}
+		}
+		fprintf(stderr, "[warpd] WARNING: Failed to grab %s (%s): %s\n",
+			path ? path : dev_name, name, strerror(errno));
+		return -1;
+	}
+
+	fprintf(stderr, "[warpd] Device added: keyboard %s (%s, fd %d)\n",
+		name[0] ? name : "Unknown", path ? path : dev_name, fd);
+
+	snprintf(keyboard_names[nr_keyboards],
+		 sizeof keyboard_names[nr_keyboards],
+		 "%s", dev_name);
+	keyboard_fds[nr_keyboards++] = fd;
+
+	if (strcasecmp(name, "kanata") == 0 && nr_busy_keyboards > 0) {
+		for (int b = 0; b < nr_busy_keyboards; b++) {
+			fprintf(stderr, "[warpd] Dropping busy device %s (managed by kanata)\n",
+				busy_keyboards[b].name);
+			close(busy_keyboards[b].fd);
+		}
+		nr_busy_keyboards = 0;
+	}
+
+	return 1;
+}
+
+static void retry_busy_keyboards()
+{
+	int i = 0;
+	while (i < nr_busy_keyboards && nr_keyboards < MAX_KEYBOARDS) {
+		int fd = busy_keyboards[i].fd;
+		char name[256] = "";
+		ioctl(fd, EVIOCGNAME(sizeof name), name);
+
+		way_input_release_keys(fd);
+
+		if (ioctl(fd, EVIOCGRAB, 1) == 0) {
+			fprintf(stderr, "[warpd] Device added: keyboard %s (%s, fd %d)\n",
+				name[0] ? name : "Unknown", busy_keyboards[i].name, fd);
+
+			snprintf(keyboard_names[nr_keyboards],
+				 sizeof keyboard_names[nr_keyboards],
+				 "%s", busy_keyboards[i].name);
+			keyboard_fds[nr_keyboards++] = fd;
+
+			for (int j = i; j < nr_busy_keyboards - 1; j++)
+				busy_keyboards[j] = busy_keyboards[j + 1];
+			nr_busy_keyboards--;
+		} else if (errno == EBUSY) {
+			i++;
+		} else {
+			fprintf(stderr, "[warpd debug] Busy device %s error: %s; dropping\n",
+				busy_keyboards[i].name, strerror(errno));
+			close(fd);
+			for (int j = i; j < nr_busy_keyboards - 1; j++)
+				busy_keyboards[j] = busy_keyboards[j + 1];
+			nr_busy_keyboards--;
+		}
+	}
+}
+
+static void handle_device_added(const char *dev_name)
+{
+	if (strncmp(dev_name, "event", 5) != 0)
+		return;
+
+	for (int i = 0; i < nr_keyboards; i++) {
+		if (!strcmp(keyboard_names[i], dev_name))
+			return;
+	}
+	for (int i = 0; i < nr_busy_keyboards; i++) {
+		if (!strcmp(busy_keyboards[i].name, dev_name))
+			return;
+	}
+
+	char path[512];
+	snprintf(path, sizeof path, "/dev/input/%s", dev_name);
+
+	int fd = open(path, O_RDWR | O_NONBLOCK);
+	if (fd < 0)
+		fd = open(path, O_RDONLY | O_NONBLOCK);
+	if (fd < 0)
+		return;
+
+	if (is_keyboard(fd)) {
+		fprintf(stderr, "[warpd debug] New keyboard device detected: %s\n", path);
+		if (keyboards_grabbed) {
+			int res = try_grab_fd(fd, dev_name, path);
+			if (res < 0)
+				close(fd);
+		} else {
+			close(fd);
+		}
+	} else if (is_mouse(fd)) {
+		fprintf(stderr, "[warpd debug] New mouse device detected: %s\n", path);
+		if (nr_mice > 0 && nr_mice < MAX_MICE) {
+			int exists = 0;
+			for (int i = 0; i < nr_mice; i++) {
+				if (!strcmp(mouse_names[i], dev_name)) {
+					exists = 1;
+					break;
+				}
+			}
+			if (!exists) {
+				snprintf(mouse_names[nr_mice], sizeof mouse_names[nr_mice], "%s", dev_name);
+				mouse_fds[nr_mice++] = fd;
+				return;
+			}
+		}
+		close(fd);
+	} else {
+		close(fd);
+	}
+}
+
+static void handle_device_removed(const char *dev_name)
+{
+	if (strncmp(dev_name, "event", 5) != 0)
+		return;
+
+	for (int i = 0; i < nr_keyboards; i++) {
+		if (!strcmp(keyboard_names[i], dev_name)) {
+			remove_keyboard_at(i);
+			break;
+		}
+	}
+
+	for (int i = 0; i < nr_busy_keyboards; i++) {
+		if (!strcmp(busy_keyboards[i].name, dev_name)) {
+			remove_busy_keyboard_at(i);
+			break;
+		}
+	}
+
+	for (int i = 0; i < nr_mice; i++) {
+		if (!strcmp(mouse_names[i], dev_name)) {
+			fprintf(stderr, "[warpd debug] Device removed: mouse %s (fd %d)\n",
+				mouse_names[i], mouse_fds[i]);
+			close(mouse_fds[i]);
+			for (int j = i; j < nr_mice - 1; j++) {
+				mouse_fds[j] = mouse_fds[j + 1];
+				memcpy(mouse_names[j], mouse_names[j + 1], sizeof mouse_names[j]);
+			}
+			nr_mice--;
+			break;
+		}
+	}
+}
+
+void way_input_drain_inotify()
+{
+	if (input_inotify_fd < 0)
+		return;
+
+	char buf[4096] __attribute__ ((aligned(__alignof__(struct inotify_event))));
+	ssize_t len;
+
+	while ((len = read(input_inotify_fd, buf, sizeof buf)) > 0) {
+		const struct inotify_event *event;
+		for (char *ptr = buf; ptr < buf + len;
+		     ptr += sizeof(struct inotify_event) + event->len) {
+			event = (const struct inotify_event *)ptr;
+			if (event->len > 0) {
+				if (event->mask & IN_DELETE) {
+					handle_device_removed(event->name);
+				} else if (event->mask & (IN_CREATE | IN_ATTRIB)) {
+					handle_device_added(event->name);
+				}
+			}
+		}
+	}
+}
+
 void way_input_grab_keyboard()
 {
 	DIR *dir;
 	struct dirent *ent;
-	char path[256];
-	char name[256];
+	char path[512];
 	int i, j;
-	int prev_keyboards;
+
+	kanata_change_layer("warpd-active");
+
+	init_inotify_if_needed();
+	way_input_drain_inotify();
+
+	keyboards_grabbed = 1;
 
 	/*
-	 * Re-grab any cached fds first. Drop those whose underlying device
-	 * has been unplugged so the rescan below can pick up a replacement.
+	 * Re-grab any cached fds first.
+	 * If re-grab fails with EBUSY, queue into busy_keyboards for retry.
+	 * If re-grab fails with ENODEV/EBADF, close and discard.
 	 */
-	prev_keyboards = nr_keyboards;
 	j = 0;
 	for (i = 0; i < nr_keyboards; i++) {
 		way_input_release_keys(keyboard_fds[i]);
 
 		if (ioctl(keyboard_fds[i], EVIOCGRAB, 1) < 0) {
-			fprintf(stderr, "[warpd debug] Failed to re-grab cached fd %d: %s\n", keyboard_fds[i], strerror(errno));
-			close(keyboard_fds[i]);
+			if (errno == EBUSY) {
+				fprintf(stderr, "[warpd debug] Cached fd %d (%s) is busy, queuing for retry\n",
+					keyboard_fds[i], keyboard_names[i]);
+				if (nr_busy_keyboards < MAX_KEYBOARDS) {
+					busy_keyboards[nr_busy_keyboards].fd = keyboard_fds[i];
+					snprintf(busy_keyboards[nr_busy_keyboards].name,
+						 sizeof(busy_keyboards[nr_busy_keyboards].name),
+						 "%s", keyboard_names[i]);
+					nr_busy_keyboards++;
+				} else {
+					close(keyboard_fds[i]);
+				}
+			} else {
+				fprintf(stderr, "[warpd debug] Failed to re-grab cached fd %d (%s): %s\n",
+					keyboard_fds[i], keyboard_names[i], strerror(errno));
+				close(keyboard_fds[i]);
+			}
 			continue;
 		}
 
-		if (j != i)
+		if (j != i) {
 			memcpy(keyboard_names[j], keyboard_names[i],
 			       sizeof keyboard_names[j]);
-		keyboard_fds[j++] = keyboard_fds[i];
+			keyboard_fds[j] = keyboard_fds[i];
+		}
+		j++;
 	}
 	nr_keyboards = j;
 
 	/*
-	 * Fast path: all cached keyboards re-grabbed successfully and none
-	 * disappeared.  Skip the /dev/input scan (33+ devices on a typical
-	 * system) to avoid noticeable lag on every mode activation.
-	 * A rescan is only triggered when a device dropped (possible hotplug)
-	 * or on the very first grab (no cached devices yet).
+	 * Scan /dev/input for keyboards that are not already grabbed or busy.
 	 */
-	if (prev_keyboards > 0 && nr_keyboards == prev_keyboards) {
-		x_active_mods = 0;
-		sync_virtual_mods();
-		return;
+	dir = opendir("/dev/input");
+	if (dir) {
+		while ((ent = readdir(dir)) && (nr_keyboards + nr_busy_keyboards) < MAX_KEYBOARDS) {
+			int fd, already_tracked = 0;
+
+			if (strncmp(ent->d_name, "event", 5) != 0)
+				continue;
+
+			for (i = 0; i < nr_keyboards; i++) {
+				if (!strcmp(keyboard_names[i], ent->d_name)) {
+					already_tracked = 1;
+					break;
+				}
+			}
+			if (already_tracked)
+				continue;
+
+			for (i = 0; i < nr_busy_keyboards; i++) {
+				if (!strcmp(busy_keyboards[i].name, ent->d_name)) {
+					already_tracked = 1;
+					break;
+				}
+			}
+			if (already_tracked)
+				continue;
+
+			snprintf(path, sizeof path, "/dev/input/%s", ent->d_name);
+
+			fd = open(path, O_RDWR | O_NONBLOCK);
+			if (fd < 0)
+				fd = open(path, O_RDONLY | O_NONBLOCK);
+			if (fd < 0) {
+				fprintf(stderr, "[warpd debug] Failed to open %s: %s\n", path, strerror(errno));
+				continue;
+			}
+
+			if (!is_keyboard(fd)) {
+				close(fd);
+				continue;
+			}
+
+			int res = try_grab_fd(fd, ent->d_name, path);
+			if (res < 0)
+				close(fd);
+		}
+		closedir(dir);
+	} else {
+		fprintf(stderr, "[warpd debug] Failed to open /dev/input: %s\n", strerror(errno));
+	}
+
+	if (has_kanata_keyboard() && nr_busy_keyboards > 0) {
+		for (int b = 0; b < nr_busy_keyboards; b++)
+			close(busy_keyboards[b].fd);
+		nr_busy_keyboards = 0;
 	}
 
 	/*
-	 * Slow path: first grab, or at least one keyboard disappeared.
-	 * Rescan /dev/input to pick up hot-plugged replacements.
-	 * Already-grabbed devices are matched by event-node basename and
-	 * skipped to avoid double-grabbing.
+	 * If any candidate keyboards were busy (e.g. kanata shutting down via kanata_sync.sh),
+	 * retry with short delays to grab them the moment they become free.
 	 */
-	dir = opendir("/dev/input");
-	if (!dir) {
-		fprintf(stderr, "[warpd debug] Failed to open /dev/input: %s\n", strerror(errno));
-		if (nr_keyboards == 0) {
-			fprintf(stderr, "WARNING: Cannot open /dev/input. Falling back to Wayland key events (requires window focus).\n");
-		}
-		x_active_mods = 0;
-		sync_virtual_mods();
-		return;
-	}
-
-	while ((ent = readdir(dir)) && nr_keyboards < MAX_KEYBOARDS) {
-		int fd, dup = 0;
-
-		if (strncmp(ent->d_name, "event", 5) != 0)
-			continue;
-
-		for (i = 0; i < nr_keyboards; i++) {
-			if (!strcmp(keyboard_names[i], ent->d_name)) {
-				dup = 1;
+	if (nr_busy_keyboards > 0) {
+		fprintf(stderr, "[warpd debug] Waiting for %d busy keyboard(s) to release...\n", nr_busy_keyboards);
+		for (int attempt = 0; attempt < 30 && nr_busy_keyboards > 0; attempt++) {
+			usleep(10000); /* 10ms */
+			retry_busy_keyboards();
+			way_input_drain_inotify();
+			if (nr_keyboards > 0 && nr_busy_keyboards == 0)
 				break;
-			}
 		}
-		if (dup)
-			continue;
-
-		snprintf(path, sizeof path, "/dev/input/%s", ent->d_name);
-
-		fd = open(path, O_RDWR | O_NONBLOCK);
-		if (fd < 0)
-			fd = open(path, O_RDONLY | O_NONBLOCK);
-		if (fd < 0) {
-			fprintf(stderr, "[warpd debug] Failed to open %s: %s\n", path, strerror(errno));
-			continue;
-		}
-
-		if (!is_keyboard(fd)) {
-			close(fd);
-			continue;
-		}
-
-		way_input_release_keys(fd);
-
-		if (ioctl(fd, EVIOCGRAB, 1) < 0) {
-			name[0] = '\0';
-			ioctl(fd, EVIOCGNAME(sizeof name), name);
-			fprintf(stderr, "WARNING: Failed to grab %s (%s): %s\n", path, name, strerror(errno));
-			close(fd);
-			continue;
-		}
-
-		fprintf(stderr, "[warpd debug] Successfully grabbed %s (%s)\n", path, name);
-
-		snprintf(keyboard_names[nr_keyboards],
-			 sizeof keyboard_names[nr_keyboards],
-			 "%s", ent->d_name);
-		keyboard_fds[nr_keyboards++] = fd;
 	}
-
-	closedir(dir);
 
 	if (nr_keyboards == 0) {
-		fprintf(stderr, "WARNING: No keyboards found to grab (check permissions on /dev/input/). Falling back to Wayland key events (requires window focus).\n");
+		if (nr_busy_keyboards > 0) {
+			fprintf(stderr, "[warpd debug] %d keyboard(s) still busy; will continue retrying in background loop\n", nr_busy_keyboards);
+		} else {
+			fprintf(stderr, "WARNING: No keyboards found to grab (check permissions on /dev/input/). Falling back to Wayland key events (requires window focus).\n");
+		}
+	} else {
+		fprintf(stderr, "[warpd debug] Total active keyboards grabbed: %d (busy pending: %d)\n",
+			nr_keyboards, nr_busy_keyboards);
 	}
 
 	x_active_mods = 0;
@@ -522,23 +895,25 @@ void way_input_ungrab_keyboard()
 {
 	int i;
 
+	keyboards_grabbed = 0;
+
 	for (i = 0; i < nr_keyboards; i++)
 		ioctl(keyboard_fds[i], EVIOCGRAB, 0);
+
+	for (i = 0; i < nr_busy_keyboards; i++)
+		close(busy_keyboards[i].fd);
+	nr_busy_keyboards = 0;
 
 	x_active_mods = 0;
 	sync_virtual_mods();
 
-	/*
-	 * Keep fds open so way_input_grab_keyboard() can re-grab them
-	 * instantly on the next mode transition without rescanning /dev/input.
-	 * nr_keyboards is intentionally left non-zero.
-	 */
+	kanata_change_layer("base");
 }
 
 struct input_event *way_input_next_event(int timeout)
 {
 	static struct input_event ev;
-	struct pollfd pfds[MAX_KEYBOARDS + 1];
+	struct pollfd pfds[MAX_KEYBOARDS + 2];
 	int nfds, i;
 
 	while (1) {
@@ -549,6 +924,10 @@ struct input_event *way_input_next_event(int timeout)
 			return &ev;
 		}
 
+		way_input_drain_inotify();
+		if (nr_busy_keyboards > 0)
+			retry_busy_keyboards();
+
 		nfds = 0;
 		for (i = 0; i < nr_keyboards; i++) {
 			pfds[nfds].fd = keyboard_fds[i];
@@ -556,46 +935,110 @@ struct input_event *way_input_next_event(int timeout)
 			nfds++;
 		}
 
-		/* Also poll the Wayland fd to keep dispatching protocol events
-		 * (surface configure, etc.) while waiting for keyboard input. */
+		/* Also poll the Wayland fd to keep dispatching protocol events */
+		int wl_idx = nfds;
 		pfds[nfds].fd = wl_display_get_fd(wl.dpy);
 		pfds[nfds].events = POLLIN;
 		nfds++;
 
+		/* Inotify events for device add/remove */
+		int inotify_idx = -1;
+		if (input_inotify_fd >= 0) {
+			inotify_idx = nfds;
+			pfds[nfds].fd = input_inotify_fd;
+			pfds[nfds].events = POLLIN;
+			nfds++;
+		}
+
 		wl_display_flush(wl.dpy);
 		wl_display_dispatch_pending(wl.dpy);
 
-		if (!poll(pfds, nfds, timeout ? timeout : -1))
-			return NULL;
+		int poll_timeout = timeout ? timeout : -1;
+		if (nr_busy_keyboards > 0 || nr_keyboards == 0) {
+			if (poll_timeout < 0 || poll_timeout > 30)
+				poll_timeout = 30;
+		}
 
-		/* Dispatch any pending Wayland events. */
-		if (pfds[nr_keyboards].revents & POLLIN)
+		int prc = poll(pfds, nfds, poll_timeout);
+		if (prc < 0) {
+			if (errno == EINTR)
+				continue;
+			return NULL;
+		}
+
+		if (prc == 0) {
+			if (nr_busy_keyboards > 0)
+				retry_busy_keyboards();
+			if (timeout != 0)
+				return NULL;
+			continue;
+		}
+
+		/* Check inotify */
+		if (inotify_idx >= 0 && (pfds[inotify_idx].revents & POLLIN)) {
+			way_input_drain_inotify();
+			if (nr_busy_keyboards > 0)
+				retry_busy_keyboards();
+		}
+
+		/* Dispatch any pending Wayland events */
+		if (pfds[wl_idx].revents & POLLIN)
 			wl_display_dispatch(wl.dpy);
 
-		/* Read evdev events from all grabbed keyboards. */
-		for (i = 0; i < nr_keyboards; i++) {
-			struct evdev_event raw;
-
-			if (!(pfds[i].revents & POLLIN))
+		/* Read evdev events from all grabbed keyboards */
+		for (i = 0; i < nr_keyboards; ) {
+			if (pfds[i].revents & (POLLHUP | POLLERR | POLLNVAL)) {
+				fprintf(stderr, "[warpd] Device removed: keyboard %s (poll revents 0x%x)\n",
+					keyboard_names[i], pfds[i].revents);
+				remove_keyboard_at(i);
 				continue;
+			}
 
-			while (read(keyboard_fds[i], &raw, sizeof raw) == (ssize_t)sizeof raw) {
-				if (raw.type != EV_KEY)
+			if (pfds[i].revents & POLLIN) {
+				struct evdev_event raw;
+				ssize_t nread;
+				int disconnected = 0;
+
+				while ((nread = read(keyboard_fds[i], &raw, sizeof raw)) == (ssize_t)sizeof raw) {
+					if (raw.type != EV_KEY)
+						continue;
+
+					static int last_active_kbd_fd = -1;
+					if (keyboard_fds[i] != last_active_kbd_fd) {
+						char kbd_name[256] = "";
+						ioctl(keyboard_fds[i], EVIOCGNAME(sizeof kbd_name), kbd_name);
+						fprintf(stderr, "[warpd] Active input switched to keyboard: %s (%s)\n",
+							kbd_name[0] ? kbd_name : "Unknown", keyboard_names[i]);
+						last_active_kbd_fd = keyboard_fds[i];
+					}
+
+					/* value: 0=release, 1=press, 2=repeat */
+					if (raw.value == 2)
+						continue;
+
+					update_mods(raw.code, raw.value);
+
+					if (input_queue_sz < sizeof input_queue / sizeof input_queue[0]) {
+						struct input_event *qev = &input_queue[input_queue_sz++];
+						qev->code = raw.code;
+						qev->pressed = raw.value;
+						qev->mods = x_active_mods;
+					}
+				}
+
+				if (nread < 0 && (errno == ENODEV || errno == EBADF || errno == EIO)) {
+					fprintf(stderr, "[warpd] Device removed: keyboard %s (read: %s)\n",
+						keyboard_names[i], strerror(errno));
+					disconnected = 1;
+				}
+
+				if (disconnected) {
+					remove_keyboard_at(i);
 					continue;
-
-				/* value: 0=release, 1=press, 2=repeat */
-				if (raw.value == 2)
-					continue;
-
-				update_mods(raw.code, raw.value);
-
-				if (input_queue_sz < sizeof input_queue / sizeof input_queue[0]) {
-					struct input_event *qev = &input_queue[input_queue_sz++];
-					qev->code = raw.code;
-					qev->pressed = raw.value;
-					qev->mods = x_active_mods;
 				}
 			}
+
+			i++;
 		}
 	}
 }
@@ -603,17 +1046,32 @@ struct input_event *way_input_next_event(int timeout)
 void init_input()
 {
 	wl_keyboard_add_listener(wl_seat_get_keyboard(wl.seat), &wl_keyboard_listener, NULL);
+	init_inotify_if_needed();
 }
-
-static int mouse_fds[MAX_MICE];
-static char mouse_names[MAX_MICE][32];
-static int nr_mice = 0;
 
 void way_input_open_mice()
 {
 	DIR *dir;
 	struct dirent *ent;
-	char path[256];
+	char path[512];
+
+	init_inotify_if_needed();
+
+	/* Prune any stale/dead mouse fds */
+	int j = 0;
+	for (int i = 0; i < nr_mice; i++) {
+		struct stat st;
+		if (fstat(mouse_fds[i], &st) < 0) {
+			close(mouse_fds[i]);
+			continue;
+		}
+		if (j != i) {
+			mouse_fds[j] = mouse_fds[i];
+			memcpy(mouse_names[j], mouse_names[i], sizeof mouse_names[j]);
+		}
+		j++;
+	}
+	nr_mice = j;
 
 	dir = opendir("/dev/input");
 	if (!dir)
@@ -645,9 +1103,13 @@ void way_input_open_mice()
 			continue;
 		}
 
-		snprintf(mouse_names[nr_mice], sizeof mouse_names[nr_mice],
-			 "%s", ent->d_name);
+		char mname[256] = "";
+		ioctl(fd, EVIOCGNAME(sizeof mname), mname);
+		strncpy(mouse_names[nr_mice], ent->d_name, sizeof(mouse_names[nr_mice]) - 1);
+		mouse_names[nr_mice][sizeof(mouse_names[nr_mice]) - 1] = '\0';
 		mouse_fds[nr_mice++] = fd;
+		fprintf(stderr, "[warpd] Device added: mouse %s (/dev/input/%s, fd %d)\n",
+			mname[0] ? mname : "Unknown", ent->d_name, fd);
 	}
 
 	closedir(dir);
@@ -674,6 +1136,8 @@ int way_input_poll_mice(int timeout)
 {
 	struct pollfd pfds[MAX_MICE];
 	int i;
+	static int last_active_mouse_fd = -1;
+	static uint64_t last_hw_mouse_time = 0;
 
 	if (!nr_mice)
 		return 0;
@@ -686,17 +1150,59 @@ int way_input_poll_mice(int timeout)
 	if (poll(pfds, nr_mice, timeout) <= 0)
 		return 0;
 
-	for (i = 0; i < nr_mice; i++) {
-		if (!(pfds[i].revents & POLLIN))
+	int mouse_moved = 0;
+	for (i = 0; i < nr_mice; ) {
+		if (pfds[i].revents & (POLLHUP | POLLERR | POLLNVAL)) {
+			fprintf(stderr, "[warpd] Device removed: mouse %s\n", mouse_names[i]);
+			close(mouse_fds[i]);
+			for (int k = i; k < nr_mice - 1; k++) {
+				mouse_fds[k] = mouse_fds[k + 1];
+				memcpy(mouse_names[k], mouse_names[k + 1], sizeof mouse_names[k]);
+			}
+			nr_mice--;
 			continue;
-
-		struct evdev_event raw;
-		while (read(mouse_fds[i], &raw, sizeof raw) == (ssize_t)sizeof raw) {
-			if (raw.type == EV_REL &&
-			    (raw.code == REL_X || raw.code == REL_Y))
-				return 1;
 		}
+
+		if (pfds[i].revents & POLLIN) {
+			struct evdev_event raw;
+			ssize_t n;
+			int disconnected = 0;
+			while ((n = read(mouse_fds[i], &raw, sizeof raw)) == (ssize_t)sizeof raw) {
+				if (raw.type == EV_REL &&
+				    (raw.code == REL_X || raw.code == REL_Y)) {
+					mouse_moved = 1;
+					uint64_t now = get_time_ms();
+					if (mouse_fds[i] != last_active_mouse_fd || (now - last_hw_mouse_time > 1500)) {
+						char mname[256] = "";
+						ioctl(mouse_fds[i], EVIOCGNAME(sizeof mname), mname);
+						if (mouse_fds[i] != last_active_mouse_fd) {
+							fprintf(stderr, "[warpd] Active input switched to mouse: %s (%s)\n",
+								mname[0] ? mname : "Unknown", mouse_names[i]);
+						} else {
+							fprintf(stderr, "[warpd] Hardware cursor movement detected on %s (%s)\n",
+								mname[0] ? mname : "Unknown", mouse_names[i]);
+						}
+						last_active_mouse_fd = mouse_fds[i];
+						last_hw_mouse_time = now;
+					}
+				}
+			}
+			if (n < 0 && (errno == ENODEV || errno == EBADF || errno == EIO)) {
+				disconnected = 1;
+			}
+			if (disconnected) {
+				fprintf(stderr, "[warpd] Device removed: mouse %s\n", mouse_names[i]);
+				close(mouse_fds[i]);
+				for (int k = i; k < nr_mice - 1; k++) {
+					mouse_fds[k] = mouse_fds[k + 1];
+					memcpy(mouse_names[k], mouse_names[k + 1], sizeof mouse_names[k]);
+				}
+				nr_mice--;
+				continue;
+			}
+		}
+		i++;
 	}
 
-	return 0;
+	return mouse_moved;
 }

@@ -128,6 +128,8 @@ struct input_event *way_input_next_event(int timeout);
 uint8_t way_input_lookup_code(const char *name, int *shifted);
 const char *way_input_lookup_name(uint8_t code, int shifted);
 struct input_event *way_input_wait(struct input_event *events, const char *names[], size_t sz);
+int way_input_get_inotify_fd();
+void way_input_drain_inotify();
 void way_input_open_mice();
 void way_input_close_mice();
 int way_input_get_mouse_fds(int *fds);

@@ -86,7 +86,6 @@ struct input_event *grid_mode()
 	const int nc = config_get_int("grid_nc");
 	const int nr = config_get_int("grid_nr");
 
-	platform->input_grab_keyboard();
 	platform->mouse_hide();
 	mouse_reset();
 
@@ -97,6 +96,8 @@ struct input_event *grid_mode()
 	my = grid_height / 2;
 	platform->mouse_move(scr, mx, my);
 	redraw(mx, my, 1);
+
+	platform->input_grab_keyboard();
 
 	const char *keys[] = {
 		"grid_up",

@@ -110,8 +110,6 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 	    "top",	     "up",
 	};
 
-	platform->input_grab_keyboard();
-
 	platform->mouse_get_position(&scr, &mx, &my);
 	platform->screen_get_dimensions(scr, &sw, &sh);
 
@@ -122,6 +120,8 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 
 	mouse_reset();
 	redraw(scr, mx, my, !show_cursor);
+
+	platform->input_grab_keyboard();
 	// printf("start normal \n");
 
 	uint64_t time = 0;
@@ -346,7 +346,6 @@ exit:
 		dragging = 0;
 	}
 
-	// platform->mouse_show();
 	platform->screen_clear(scr);
 
 	platform->input_ungrab_keyboard();

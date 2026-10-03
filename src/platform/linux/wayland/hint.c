@@ -11,18 +11,29 @@ static const char *font_family;
 
 static int calculate_font_size(cairo_t *cr, int w, int h)
 {
+	static int cached_w = -1, cached_h = -1, cached_sz = -1;
+	static const char *cached_font = NULL;
+
+	if (cached_w == w && cached_h == h && cached_sz > 0 && cached_font == font_family)
+		return cached_sz;
+
 	cairo_text_extents_t extents;
 	size_t sz = 100;
 
-	cairo_select_font_face (cr,
-				font_family,
-				CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+	cairo_select_font_face(cr,
+			       font_family,
+			       CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
 
 	do {
 		cairo_set_font_size(cr, sz);
 		cairo_text_extents(cr, "WW", &extents);
 		sz--;
-	} while (extents.height > h || extents.width > w);
+	} while (sz > 1 && (extents.height > h || extents.width > w));
+
+	cached_w = w;
+	cached_h = h;
+	cached_sz = sz;
+	cached_font = font_family;
 
 	return sz;
 }

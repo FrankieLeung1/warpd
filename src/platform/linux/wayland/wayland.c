@@ -229,61 +229,42 @@ void way_mouse_click(int btn)
 	wl_display_flush(wl.dpy);
 }
 
-void way_mouse_get_position(struct screen **scr, int *x, int *y)
-{
-	if (is_hyprland) {
-		FILE *fp = popen("hyprctl cursorpos", "r");
-		if (fp) {
-			int gx, gy;
-			if (fscanf(fp, "%d, %d", &gx, &gy) == 2) {
-				/*
-				 * Cursor is still parked exactly where we
-				 * hid it — report the (-1, -1) sentinel so
-				 * mode_loop knows the user hasn't moved it.
-				 */
-				if (gx == hidden_gx && gy == hidden_gy) {
-					if (scr)
-						*scr = ptr.scr;
-					if (x)
-						*x = -1;
-					if (y)
-						*y = -1;
-					pclose(fp);
-					return;
-				}
-				size_t i;
-				for (i = 0; i < nr_screens; i++) {
-					struct screen *s = &screens[i];
-					if (gx >= s->x && gx < s->x + s->w &&
-					    gy >= s->y && gy < s->y + s->h) {
-						if (scr)
-							*scr = s;
-						if (x)
-							*x = gx - s->x;
-						if (y)
-							*y = gy - s->y;
-						pclose(fp);
-						return;
-					}
-				}
-			}
-			pclose(fp);
-		}
-	}
-
-	if (scr)
-		*scr = ptr.scr;
-	if (x)
-		*x = ptr.x;
-	if (y)
-		*y = ptr.y;
-}
-
 static struct sockaddr_un hypr_addr;
 static int hypr_addr_len;
 static int hypr_use_lua;
 
-static int hyprland_query(const char *cmd, char *buf, size_t bufsz);
+static int hyprland_query(const char *cmd, char *buf, size_t bufsz)
+{
+	int fd, n;
+	size_t total = 0;
+
+	if (!hypr_addr.sun_path[0] || bufsz == 0)
+		return -1;
+
+	fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (fd < 0)
+		return -1;
+
+	if (connect(fd, (struct sockaddr *)&hypr_addr, hypr_addr_len) < 0) {
+		close(fd);
+		return -1;
+	}
+
+	if (write(fd, cmd, strlen(cmd)) < 0) {
+		close(fd);
+		return -1;
+	}
+
+	while (total < bufsz - 1) {
+		n = read(fd, buf + total, bufsz - 1 - total);
+		if (n <= 0)
+			break;
+		total += n;
+	}
+	buf[total] = '\0';
+	close(fd);
+	return (int)total;
+}
 
 static void hyprland_ipc_init(void)
 {
@@ -333,37 +314,51 @@ static int hyprland_ipc(const char *cmd)
 	return r > 0 ? 0 : -1;
 }
 
-static int hyprland_query(const char *cmd, char *buf, size_t bufsz)
+void way_mouse_get_position(struct screen **scr, int *x, int *y)
 {
-	int fd, n;
-	size_t total = 0;
-
-	if (!hypr_addr.sun_path[0] || bufsz == 0)
-		return -1;
-
-	fd = socket(AF_UNIX, SOCK_STREAM, 0);
-	if (fd < 0)
-		return -1;
-
-	if (connect(fd, (struct sockaddr *)&hypr_addr, hypr_addr_len) < 0) {
-		close(fd);
-		return -1;
+	if (is_hyprland) {
+		char buf[128];
+		if (hyprland_query("cursorpos", buf, sizeof buf) > 0) {
+			int gx, gy;
+			if (sscanf(buf, "%d, %d", &gx, &gy) == 2) {
+				/*
+				 * Cursor is still parked exactly where we
+				 * hid it — report the (-1, -1) sentinel so
+				 * mode_loop knows the user hasn't moved it.
+				 */
+				if (gx == hidden_gx && gy == hidden_gy) {
+					if (scr)
+						*scr = ptr.scr;
+					if (x)
+						*x = -1;
+					if (y)
+						*y = -1;
+					return;
+				}
+				size_t i;
+				for (i = 0; i < nr_screens; i++) {
+					struct screen *s = &screens[i];
+					if (gx >= s->x && gx < s->x + s->w &&
+					    gy >= s->y && gy < s->y + s->h) {
+						if (scr)
+							*scr = s;
+						if (x)
+							*x = gx - s->x;
+						if (y)
+							*y = gy - s->y;
+						return;
+					}
+				}
+			}
+		}
 	}
 
-	if (write(fd, cmd, strlen(cmd)) < 0) {
-		close(fd);
-		return -1;
-	}
-
-	while (total < bufsz - 1) {
-		n = read(fd, buf + total, bufsz - 1 - total);
-		if (n <= 0)
-			break;
-		total += n;
-	}
-	buf[total] = '\0';
-	close(fd);
-	return (int)total;
+	if (scr)
+		*scr = ptr.scr;
+	if (x)
+		*x = ptr.x;
+	if (y)
+		*y = ptr.y;
 }
 
 /*
@@ -589,7 +584,7 @@ struct input_event *way_input_wait(struct input_event *events, const char *names
 
 	/* Event loop: wait for a shortcut press or config file change. */
 	while (1) {
-		struct pollfd pfds[1 + MAX_MICE];
+		struct pollfd pfds[2 + MAX_MICE];
 		int mouse_fds[MAX_MICE];
 		int nr_mouse_fds = 0;
 		int nfds = 0;
@@ -598,15 +593,23 @@ struct input_event *way_input_wait(struct input_event *events, const char *names
 		pfds[0].events = POLLIN;
 		nfds = 1;
 
+		int inotify_fd = way_input_get_inotify_fd();
+		int inotify_idx = -1;
+		if (inotify_fd >= 0) {
+			inotify_idx = nfds;
+			pfds[nfds].fd = inotify_fd;
+			pfds[nfds].events = POLLIN;
+			nfds++;
+		}
+
 		/*
 		 * Check for physical mouse movement via evdev.
 		 * Restore and show the cursor when the user moves
-		 * their mouse. Rescan first so a mouse hot-plugged
-		 * after warpd was activated is picked up.
+		 * their mouse.
 		 */
 		if (saved_scr) {
-			way_input_open_mice();
 			if (way_input_poll_mice(0)) {
+				fprintf(stderr, "[warpd] Hardware cursor movement detected: restoring visible cursor\n");
 				way_mouse_move(saved_scr, saved_x, saved_y);
 				way_mouse_show();
 				saved_scr = NULL;
@@ -649,6 +652,9 @@ struct input_event *way_input_wait(struct input_event *events, const char *names
 
 			continue;
 		}
+
+		if (inotify_idx >= 0 && (pfds[inotify_idx].revents & POLLIN))
+			way_input_drain_inotify();
 
 		if (pfds[0].revents & POLLIN)
 			wl_display_dispatch(wl.dpy);

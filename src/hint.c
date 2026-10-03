@@ -223,7 +223,6 @@ static int hint_selection_ext(screen_t scr, struct hint *_hints, size_t _nr_hint
 
 	platform->input_ungrab_keyboard();
 	platform->screen_clear(scr);
-	platform->mouse_show();
 
 	platform->commit();
 	return rc;
