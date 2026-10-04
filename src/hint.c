@@ -157,26 +157,38 @@ static int hint_selection_ext(screen_t scr, struct hint *_hints, size_t _nr_hint
 
 		ev = platform->input_next_event(0);
 
+		if (ev) {
+			warpd_debug("Hint mode key: %s %s (code=%u, mods=0x%x)",
+				ev->pressed ? "PRESS" : "RELEASE",
+				input_event_tostr(ev), ev->code, ev->mods);
+		}
+
 		if (!ev->pressed)
 			continue;
 
 		len = strlen(buf);
 
 		if (config_input_match(ev, "hint_exit")) {
+			warpd_debug("Hint action matched: hint_exit");
 			rc = -1;
 			break;
 		} else if (config_input_match(ev, "hint_undo_all")) {
+			warpd_debug("Hint action matched: hint_undo_all");
 			buf[0] = 0;
 		} else if (config_input_match(ev, "hint_undo")) {
+			warpd_debug("Hint action matched: hint_undo");
 			if (len)
 				buf[len - 1] = 0;
 		} else if (config_input_match(ev, "hint_history")) {
+			warpd_debug("Hint action matched: hint_history");
 			rc = -4;
 			break;
 		} else if (is_local && config_input_match(ev, "hint_local_decrease")) {
+			warpd_debug("Hint action matched: hint_local_decrease");
 			rc = -2;
 			break;
 		} else if (is_local && config_input_match(ev, "hint_local_increase")) {
+			warpd_debug("Hint action matched: hint_local_increase");
 			rc = -3;
 			break;
 		} else {
@@ -185,6 +197,7 @@ static int hint_selection_ext(screen_t scr, struct hint *_hints, size_t _nr_hint
 			if (!name || name[1] || !strcmp(name, "space"))
 				continue;
 
+			warpd_debug("Hint key typed: '%c' (buffer now '%s%c')", name[0], buf, name[0]);
 			buf[len++] = name[0];
 		}
 

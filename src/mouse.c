@@ -136,15 +136,19 @@ int mouse_process_key(struct input_event *ev, const char *up_key,
 	}
 
 	if (config_input_match(ev, down_key)) {
+		warpd_debug("Mouse move key: down (%s)", ev->pressed ? "PRESS" : "RELEASE");
 		down = ev->pressed;
 		ret = 1;
 	} else if (config_input_match(ev, left_key)) {
+		warpd_debug("Mouse move key: left (%s)", ev->pressed ? "PRESS" : "RELEASE");
 		left = ev->pressed;
 		ret = 1;
 	} else if (config_input_match(ev, right_key)) {
+		warpd_debug("Mouse move key: right (%s)", ev->pressed ? "PRESS" : "RELEASE");
 		right = ev->pressed;
 		ret = 1;
 	} else if (config_input_match(ev, up_key)) {
+		warpd_debug("Mouse move key: up (%s)", ev->pressed ? "PRESS" : "RELEASE");
 		up = ev->pressed;
 		ret = 1;
 	}

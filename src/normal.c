@@ -122,6 +122,10 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 	redraw(scr, mx, my, !show_cursor);
 	// printf("start normal \n");
 
+	int tick_interval = config_get_int("repeat_interval");
+	if (tick_interval <= 0)
+		tick_interval = 2;
+
 	uint64_t time = 0;
 	uint64_t last_blink_update = 0;
 	while (1) {
@@ -142,18 +146,18 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 
 		config_input_whitelist(keys, sizeof keys / sizeof keys[0]);
 		if (start_ev == NULL) {
-			ev = platform->input_next_event(10);
-			time += 10;
+			ev = platform->input_next_event(tick_interval);
+			time += tick_interval;
 		} else {
 			ev = start_ev;
 			start_ev = NULL;
 		}
 
-		/* if (ev) {
-		        printf("ev %s %s\n",
-		                platform->input_lookup_name(ev->code, 0),
-		                ev->pressed ? "pressed" : "unpressed");
-		} */
+		if (ev) {
+			warpd_debug("Normal mode key: %s %s (code=%u, mods=0x%x)",
+				ev->pressed ? "PRESS" : "RELEASE",
+				input_event_tostr(ev), ev->code, ev->mods);
+		}
 
 		platform->mouse_get_position(&scr, &mx, &my);
 
@@ -218,6 +222,7 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 		if (!ev) {
 			continue;
 		} else if (config_input_match(ev, "scroll_down")) {
+			warpd_debug("Action matched: scroll_down (%s)", ev->pressed ? "PRESS" : "RELEASE");
 			redraw(scr, mx, my, 1);
 
 			if (ev->pressed) {
@@ -226,6 +231,7 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 			} else
 				scroll_decelerate();
 		} else if (config_input_match(ev, "scroll_up")) {
+			warpd_debug("Action matched: scroll_up (%s)", ev->pressed ? "PRESS" : "RELEASE");
 			redraw(scr, mx, my, 1);
 
 			if (ev->pressed) {
@@ -234,11 +240,13 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 			} else
 				scroll_decelerate();
 		} else if (config_input_match(ev, "accelerator")) {
+			warpd_debug("Action matched: accelerator (%s)", ev->pressed ? "PRESS" : "RELEASE");
 			if (ev->pressed)
 				mouse_fast();
 			else
 				mouse_normal();
 		} else if (config_input_match(ev, "decelerator")) {
+			warpd_debug("Action matched: decelerator (%s)", ev->pressed ? "PRESS" : "RELEASE");
 			if (ev->pressed)
 				mouse_slow();
 			else
@@ -248,28 +256,36 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 		}
 
 		if (config_input_match(ev, "top")) {
+			warpd_debug("Action matched: top");
 			move(scr, mx, cursz / 2, !show_cursor);
 		} else if (config_input_match(ev, "bottom")) {
+			warpd_debug("Action matched: bottom");
 			move(scr, mx, sh - cursz / 2, !show_cursor);
 		} else if (config_input_match(ev, "middle")) {
+			warpd_debug("Action matched: middle");
 			move(scr, mx, sh / 2, !show_cursor);
 		} else if (config_input_match(ev, "start")) {
+			warpd_debug("Action matched: start");
 			move(scr, 1, my, !show_cursor);
 		} else if (config_input_match(ev, "end")) {
+			warpd_debug("Action matched: end");
 			move(scr, sw - cursz, my, !show_cursor);
 		} else if (config_input_match(ev, "hist_back")) {
+			warpd_debug("Action matched: hist_back");
 			hist_add(mx, my);
 			hist_prev();
 			hist_get(&mx, &my);
 
 			move(scr, mx, my, !show_cursor);
 		} else if (config_input_match(ev, "hist_forward")) {
+			warpd_debug("Action matched: hist_forward");
 			hist_next();
 			hist_get(&mx, &my);
 
 			move(scr, mx, my, !show_cursor);
 		} else if (config_input_match(ev, "drag")) {
 			dragging = !dragging;
+			warpd_debug("Action matched: drag (now %s, button %d)", dragging ? "ON" : "OFF", config_get_int("drag_button"));
 			if (dragging)
 				platform->mouse_down(
 				    config_get_int("drag_button"));
@@ -279,6 +295,7 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 
 			redraw(scr, mx, my, !show_cursor);
 		} else if (config_input_match(ev, "copy_and_exit")) {
+			warpd_debug("Action matched: copy_and_exit");
 			platform->mouse_up(config_get_int("drag_button"));
 			dragging = 0;
 			platform->copy_selection();
@@ -291,14 +308,17 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 			   config_input_match(ev, "hint2") ||
 			   config_input_match(ev, "hint") ||
 			   config_input_match(ev, "hint_local")) {
+			warpd_debug("Action matched: exit/transition");
 			goto exit;
 		} else if (config_input_match(ev, "print")) {
+			warpd_debug("Action matched: print coords");
 			printf("%d %d %s\n", mx, my, input_event_tostr(ev));
 			fflush(stdout);
 		} else { /* Mouse Buttons. */
 			int btn;
 
 			if ((btn = config_input_match(ev, "buttons"))) {
+				warpd_debug("Action matched: buttons (click button %d)", btn);
 				if (oneshot) {
 					printf("%d %d\n", mx, my);
 					exit(btn);
@@ -309,6 +329,7 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 				platform->mouse_click(btn);
 			} else if ((btn = config_input_match(
 					ev, "oneshot_buttons"))) {
+				warpd_debug("Action matched: oneshot_buttons (click button %d)", btn);
 				hist_add(mx, my);
 				platform->mouse_click(btn);
 
@@ -325,6 +346,7 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 					if (ev && ev->pressed &&
 					    config_input_match(
 						ev, "oneshot_buttons")) {
+						warpd_debug("Action matched: oneshot_buttons repeat (button %d)", btn);
 						platform->mouse_click(btn);
 					}
 				}

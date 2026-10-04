@@ -17,6 +17,7 @@
 
 extern const char *input_event_tostr(struct input_event *ev);
 extern const char *config_get(const char *key);
+extern int config_get_int(const char *key);
 extern int saved_x;
 extern int saved_y;
 extern screen_t saved_scr;
@@ -159,6 +160,7 @@ void way_mouse_move(struct screen *scr, int x, int y)
 	 * Virtual pointer space always begins at 0,0, while global compositor
 	 * space may have a negative real origin :/.
 	 */
+	warpd_debug("Wayland emit: mouse_move screen_x=%d, screen_y=%d (hide=%d)", x, y, hide);
 	zwlr_virtual_pointer_v1_motion_absolute(wl.ptr, 0,
 						wl_fixed_from_int(x+scr->x-minx),
 						wl_fixed_from_int(y+scr->y-miny),
@@ -200,7 +202,9 @@ void way_mouse_down(int btn)
 {
 	assert(btn < (int)(sizeof btn_state / sizeof btn_state[0]));
 	btn_state[btn-1] = 1;
+	int raw_btn = btn;
 	normalize_btn(btn);
+	warpd_debug("Wayland emit: mouse_down btn=%d (linux code=%d)", raw_btn, btn);
 	zwlr_virtual_pointer_v1_button(wl.ptr, 0, btn, 1);
 	zwlr_virtual_pointer_v1_frame(wl.ptr);
 	wl_display_flush(wl.dpy);
@@ -210,7 +214,9 @@ void way_mouse_up(int btn)
 {
 	assert(btn < (int)(sizeof btn_state / sizeof btn_state[0]));
 	btn_state[btn-1] = 0;
+	int raw_btn = btn;
 	normalize_btn(btn);
+	warpd_debug("Wayland emit: mouse_up btn=%d (linux code=%d)", raw_btn, btn);
 	zwlr_virtual_pointer_v1_button(wl.ptr, 0, btn, 0);
 	zwlr_virtual_pointer_v1_frame(wl.ptr);
 	wl_display_flush(wl.dpy);
@@ -218,7 +224,9 @@ void way_mouse_up(int btn)
 
 void way_mouse_click(int btn)
 {
+	int raw_btn = btn;
 	normalize_btn(btn);
+	warpd_debug("Wayland emit: mouse_click btn=%d (linux code=%d)", raw_btn, btn);
 
 	uint32_t t = 0;
 	zwlr_virtual_pointer_v1_button(wl.ptr, t, btn, WL_POINTER_BUTTON_STATE_PRESSED);
@@ -429,10 +437,35 @@ static uint32_t get_time_msec() {
 	return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
+static int active_scroll_axes = 0;
+
 void way_scroll(int direction)
+{
+	way_scroll_continuous(direction, 1.0);
+}
+
+void way_scroll_continuous(int direction, double clicks)
 {
 	int axis = 0;
 	int discrete = 0;
+
+	if (direction == SCROLL_STOP) {
+		uint32_t t = get_time_msec();
+		if (active_scroll_axes & 1) {
+			warpd_debug("Wayland emit: scroll stop on axis 0 (vertical)");
+			zwlr_virtual_pointer_v1_axis_source(wl.ptr, WL_POINTER_AXIS_SOURCE_CONTINUOUS);
+			zwlr_virtual_pointer_v1_axis_stop(wl.ptr, t, 0);
+		}
+		if (active_scroll_axes & 2) {
+			warpd_debug("Wayland emit: scroll stop on axis 1 (horizontal)");
+			zwlr_virtual_pointer_v1_axis_source(wl.ptr, WL_POINTER_AXIS_SOURCE_CONTINUOUS);
+			zwlr_virtual_pointer_v1_axis_stop(wl.ptr, t, 1);
+		}
+		active_scroll_axes = 0;
+		zwlr_virtual_pointer_v1_frame(wl.ptr);
+		wl_display_flush(wl.dpy);
+		return;
+	}
 
 	switch (direction) {
 	case SCROLL_DOWN:
@@ -451,19 +484,18 @@ void way_scroll(int direction)
 		axis = 1;
 		discrete = -1;
 		break;
-	case SCROLL_STOP:
-		zwlr_virtual_pointer_v1_axis_source(wl.ptr, WL_POINTER_AXIS_SOURCE_CONTINUOUS);
-		zwlr_virtual_pointer_v1_axis_stop(wl.ptr, get_time_msec(), axis);
-		zwlr_virtual_pointer_v1_frame(wl.ptr);
-		wl_display_flush(wl.dpy);
-		return;
 	default:
 		return;
 	}
 
+	active_scroll_axes |= (1 << axis);
 	uint32_t t = get_time_msec();
+	double delta = 15.0 * discrete * clicks;
+
+	warpd_debug("Wayland emit: continuous scroll direction=%d, axis=%d, clicks=%.4f, delta=%.2f",
+		direction, axis, clicks, delta);
 	zwlr_virtual_pointer_v1_axis_source(wl.ptr, WL_POINTER_AXIS_SOURCE_CONTINUOUS);
-	zwlr_virtual_pointer_v1_axis(wl.ptr, t, axis, wl_fixed_from_int(15 * discrete));
+	zwlr_virtual_pointer_v1_axis(wl.ptr, t, axis, (wl_fixed_t)(delta * 256.0 + (delta >= 0 ? 0.5 : -0.5)));
 	zwlr_virtual_pointer_v1_frame(wl.ptr);
 
 	wl_display_flush(wl.dpy);
@@ -804,4 +836,5 @@ void wayland_init(struct platform *platform)
 	platform->screen_get_dimensions = way_screen_get_dimensions;
 	platform->screen_list = way_screen_list;
 	platform->scroll = way_scroll;
+	platform->scroll_continuous = way_scroll_continuous;
 }

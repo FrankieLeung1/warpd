@@ -120,10 +120,19 @@ struct input_event *grid_mode()
 
 	config_input_whitelist(keys, sizeof keys / sizeof keys[0]);
 
+	int tick_interval = config_get_int("repeat_interval");
+	if (tick_interval <= 0)
+		tick_interval = 2;
+
 	while (1) {
 		int idx;
 
-		ev = platform->input_next_event(10);
+		ev = platform->input_next_event(tick_interval);
+		if (ev) {
+			warpd_debug("Grid mode key: %s %s (code=%u, mods=0x%x)",
+				ev->pressed ? "PRESS" : "RELEASE",
+				input_event_tostr(ev), ev->code, ev->mods);
+		}
 		platform->mouse_get_position(NULL, &mx, &my);
 
 		if (mouse_process_key(ev, "grid_up", "grid_down", "grid_left", "grid_right")) {
@@ -136,6 +145,7 @@ struct input_event *grid_mode()
 			continue;
 
 		if ((idx = config_input_match(ev, "grid_keys")) && idx <= nc * nr) {
+			warpd_debug("Grid action matched: grid_keys (idx=%d)", idx);
 			my = (my - grid_height / 2) + (grid_height / nr) * ((idx-1) / nc);
 			mx = (mx - grid_width / 2) + (grid_width / nc) * ((idx-1) % nc);
 
@@ -149,6 +159,7 @@ struct input_event *grid_mode()
 		}
 
 		if (config_input_match(ev, "grid_cut_up")) {
+			warpd_debug("Grid action matched: grid_cut_up");
 			my -= grid_height/4;
 			grid_height /= 2;
 
@@ -157,6 +168,7 @@ struct input_event *grid_mode()
 		}
 
 		if (config_input_match(ev, "grid_cut_down")) {
+			warpd_debug("Grid action matched: grid_cut_down");
 			my += grid_height/4;
 			grid_height /= 2;
 
@@ -165,6 +177,7 @@ struct input_event *grid_mode()
 		}
 
 		if (config_input_match(ev, "grid_cut_left")) {
+			warpd_debug("Grid action matched: grid_cut_left");
 			mx -= grid_width/4;
 			grid_width /= 2;
 
@@ -173,6 +186,7 @@ struct input_event *grid_mode()
 		}
 
 		if (config_input_match(ev, "grid_cut_right")) {
+			warpd_debug("Grid action matched: grid_cut_right");
 			mx += grid_width/4;
 			grid_width /= 2;
 
@@ -182,6 +196,7 @@ struct input_event *grid_mode()
 
 		if (config_input_match(ev, "buttons") ||
 			config_input_match(ev, "oneshot_buttons")) {
+			warpd_debug("Grid action matched: buttons exit");
 			goto exit;
 		}
 
@@ -189,8 +204,10 @@ struct input_event *grid_mode()
 		    config_input_match(ev, "hint") ||
 		    config_input_match(ev, "exit") ||
 		    config_input_match(ev, "drag") ||
-		    config_input_match(ev, "grid_exit"))
+		    config_input_match(ev, "grid_exit")) {
+			warpd_debug("Grid action matched: exit/transition");
 			goto exit;
+		}
 
 		redraw(mx, my, 0);
 	}

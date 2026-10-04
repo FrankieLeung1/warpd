@@ -202,6 +202,7 @@ static void print_usage()
 {
 	const char *usage =
 		"warpd: [options]\n\n"
+		"  -d, --debug                 Enable debug logging for key presses and emitted events.\n"
 		"  -f, --foreground            Run warpd in the foreground (useful for debugging).\n"
 		"  -h, --help                  Print this help message.\n"
 		"  -v, --version               Print the version and exit.\n"
@@ -230,6 +231,7 @@ static void print_version()
 }
 
 
+int debug_mode = 0;
 int dragging = 0;
 static int oneshot_flag = 0;
 static int click_flag = 0;
@@ -308,6 +310,7 @@ int main(int argc, char *argv[])
 	config_path = strdup(get_config_path("config"));
 
 	struct option opts[] = {
+		{"debug", no_argument, NULL, 'd'},
 		{"version", no_argument, NULL, 'v'},
 		{"help", no_argument, NULL, 'h'},
 		{"query", no_argument, NULL, 'q'},
@@ -330,8 +333,11 @@ int main(int argc, char *argv[])
 		{0}
 	};
 
-	while ((c = getopt_long(argc, argv, "qrhfvlc:", opts, NULL)) != -1) {
+	while ((c = getopt_long(argc, argv, "qrhfvldc:", opts, NULL)) != -1) {
 		switch (c) {
+			case 'd':
+				debug_mode = 1;
+				break;
 			case 'v':
 				print_version();
 				return 0;

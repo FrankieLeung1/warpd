@@ -42,9 +42,13 @@ void daemon_loop(const char *config_path)
 							     sizeof(activation_events[0]));
 
 		if (!ev) {
+			warpd_debug("Config file change detected; reloading config");
 			reload_config(config_path);
 			continue;
 		}
+
+		warpd_debug("Global shortcut triggered: %s (code=%u, mods=0x%x)",
+			input_event_tostr(ev), ev->code, ev->mods);
 
 		config_input_whitelist(activation_keys, sizeof activation_keys / sizeof activation_keys[0]);
 

@@ -60,7 +60,7 @@ static struct {
 
 	{ "cursor_size", "7", "The height of the pointer in normal mode.", OPT_INT },
 	{ "crosshair_thickness", "5", "The thickness of the crosshair lines in pixels.", OPT_INT },
-	{ "repeat_interval", "20", "The number of milliseconds before repeating a movement event.", OPT_INT },
+	{ "repeat_interval", "10", "The main loop tick interval in milliseconds (e.g. 2 for 500Hz, 1 for 1000Hz, 10 for 100Hz).", OPT_INT },
 	{ "speed", "220", "Pointer speed in pixels/second.", OPT_INT },
 	{ "max_speed", "1600", "The maximum pointer speed.", OPT_INT },
 	{ "decelerator_speed", "50", "Pointer speed while decelerator is depressed.", OPT_INT },
@@ -121,6 +121,7 @@ static struct {
 	{ "scroll_max_speed", "9000", "Maximum scroll speed.", OPT_INT },
 	{ "scroll_acceleration", "1600", "Scroll acceleration in units/second^2.", OPT_INT },
 	{ "scroll_deceleration", "-3400", "Scroll deceleration.", OPT_INT },
+	{ "scroll_interval", "0", "Scroll event tick interval in milliseconds (0 = dynamic from scroll_speed, or e.g. 8 for 120Hz, 16 for 60Hz).", OPT_INT },
 
 	{ "indicator", "none", "Specifies an optional visual indicator to be displayed while normal mode is active, must be one of: topright, topleft, bottomright, bottomleft, none", OPT_STRING },
 	{ "indicator_color", "#00ff00", "The color of the visual indicator color.", OPT_STRING },

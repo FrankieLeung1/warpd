@@ -23,7 +23,7 @@ void wayland_init(struct platform *platform)
 
 void platform_run(int (*main) (struct platform *platform))
 {
-	struct platform platform;
+	struct platform platform = {0};
 
 	if (getenv("WAYLAND_DISPLAY"))
 		wayland_init(&platform);

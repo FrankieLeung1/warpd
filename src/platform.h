@@ -9,6 +9,18 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdio.h>
+
+extern int debug_mode;
+#define warpd_debug(...) \
+	do { \
+		if (debug_mode) { \
+			fprintf(stderr, "[warpd debug] "); \
+			fprintf(stderr, __VA_ARGS__); \
+			fprintf(stderr, "\n"); \
+			fflush(stderr); \
+		} \
+	} while (0)
 
 #define PLATFORM_MOD_CONTROL 1
 #define PLATFORM_MOD_SHIFT 2
@@ -89,6 +101,12 @@ struct platform {
 	void (*hint_draw)(struct screen *scr, struct hint *hints, size_t n);
 
 	void (*scroll)(int direction);
+
+	/*
+	 * Optional: emit a fractional amount of scroll `clicks` in one event.
+	 * NULL on platforms that only support discrete scrolling.
+	 */
+	void (*scroll_continuous)(int direction, double clicks);
 
 	void (*copy_selection)();
 
