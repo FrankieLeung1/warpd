@@ -122,6 +122,7 @@ static struct {
 	{ "scroll_acceleration", "1600", "Scroll acceleration in units/second^2.", OPT_INT },
 	{ "scroll_deceleration", "-3400", "Scroll deceleration.", OPT_INT },
 	{ "scroll_interval", "0", "Scroll event tick interval in milliseconds (0 = dynamic from scroll_speed, or e.g. 8 for 120Hz, 16 for 60Hz).", OPT_INT },
+	{ "scroll_speed_factor", "300", "Scroll speed factor percentage when holding the scroll accelerator (shift) (e.g. 300 for 3x speed).", OPT_INT },
 
 	{ "indicator", "none", "Specifies an optional visual indicator to be displayed while normal mode is active, must be one of: topright, topleft, bottomright, bottomleft, none", OPT_STRING },
 	{ "indicator_color", "#00ff00", "The color of the visual indicator color.", OPT_STRING },

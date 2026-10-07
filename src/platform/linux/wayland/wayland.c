@@ -503,6 +503,7 @@ void way_scroll_continuous(int direction, double clicks)
 
 void way_copy_selection()
 {
+	warpd_debug("Wayland emit: copy_selection (running wtype -M ctrl c -m ctrl)");
 	pid_t child = fork();
 	if (child == 0) {
 		execlp("wtype", "wtype", "-M", "ctrl", "c", "-m", "ctrl", NULL);
@@ -510,6 +511,7 @@ void way_copy_selection()
 	} else if (child > 0) {
 		int status;
 		waitpid(child, &status, 0);
+		warpd_debug("Wayland emit: copy_selection finished (status=%d)", status);
 	}
 }
 

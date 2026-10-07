@@ -163,6 +163,7 @@ static int meta_active = 0;
 static void sync_virtual_mod(int active, int *state, const char *mod_name)
 {
 	if (active && !*state) {
+		warpd_debug("Wayland emit: sync_virtual_mod PRESS '%s' (running wtype -M %s)", mod_name, mod_name);
 		pid_t child = fork();
 		if (child == 0) {
 			execlp("wtype", "wtype", "-M", mod_name, NULL);
@@ -170,10 +171,15 @@ static void sync_virtual_mod(int active, int *state, const char *mod_name)
 		} else if (child > 0) {
 			int status;
 			waitpid(child, &status, 0);
-			if (WIFEXITED(status) && WEXITSTATUS(status) == 0)
+			if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
 				*state = 1;
+				warpd_debug("Wayland emit: sync_virtual_mod PRESS '%s' succeeded", mod_name);
+			} else {
+				warpd_debug("Wayland emit: sync_virtual_mod PRESS '%s' failed (status=%d)", mod_name, status);
+			}
 		}
 	} else if (!active && *state) {
+		warpd_debug("Wayland emit: sync_virtual_mod RELEASE '%s' (running wtype -m %s)", mod_name, mod_name);
 		pid_t child = fork();
 		if (child == 0) {
 			execlp("wtype", "wtype", "-m", mod_name, NULL);
@@ -181,8 +187,12 @@ static void sync_virtual_mod(int active, int *state, const char *mod_name)
 		} else if (child > 0) {
 			int status;
 			waitpid(child, &status, 0);
-			if (WIFEXITED(status) && WEXITSTATUS(status) == 0)
+			if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
 				*state = 0;
+				warpd_debug("Wayland emit: sync_virtual_mod RELEASE '%s' succeeded", mod_name);
+			} else {
+				warpd_debug("Wayland emit: sync_virtual_mod RELEASE '%s' failed (status=%d)", mod_name, status);
+			}
 		}
 	}
 }
@@ -468,6 +478,7 @@ void way_input_release_keys(int fd)
 		if (!(key_state[i / 8] & (1 << (i % 8))))
 			continue;
 
+		warpd_debug("Wayland emit: releasing held evdev key code %zu on fd %d", i, fd);
 		struct evdev_event ev = {0};
 		ev.type = EV_KEY;
 		ev.code = i;

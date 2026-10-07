@@ -92,6 +92,8 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 	int sh, sw;
 	int mx, my;
 	int show_cursor = !system_cursor;
+	uint8_t current_mods = start_ev ? start_ev->mods : 0;
+	int accelerator_down = 0;
 
 	int n = sscanf(blink_interval, "%d %d", &on_time, &off_time);
 	assert(n > 0);
@@ -118,6 +120,8 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 	else
 		platform->mouse_hide();
 
+	scroll_stop();
+	scroll_set_fast(0);
 	mouse_reset();
 	redraw(scr, mx, my, !show_cursor);
 	// printf("start normal \n");
@@ -157,7 +161,20 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 			warpd_debug("Normal mode key: %s %s (code=%u, mods=0x%x)",
 				ev->pressed ? "PRESS" : "RELEASE",
 				input_event_tostr(ev), ev->code, ev->mods);
+
+			const char *name = platform->input_lookup_name(ev->code, 0);
+			if (name && strstr(name, "Shift")) {
+				if (ev->pressed)
+					current_mods |= PLATFORM_MOD_SHIFT;
+				else
+					current_mods &= ~PLATFORM_MOD_SHIFT;
+			} else {
+				current_mods = ev->mods;
+			}
 		}
+
+		int shift_down = (current_mods & PLATFORM_MOD_SHIFT) != 0;
+		scroll_set_fast(shift_down || accelerator_down);
 
 		platform->mouse_get_position(&scr, &mx, &my);
 
@@ -241,10 +258,12 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 				scroll_decelerate();
 		} else if (config_input_match(ev, "accelerator")) {
 			warpd_debug("Action matched: accelerator (%s)", ev->pressed ? "PRESS" : "RELEASE");
+			accelerator_down = ev->pressed;
 			if (ev->pressed)
 				mouse_fast();
 			else
 				mouse_normal();
+			scroll_set_fast(shift_down || accelerator_down);
 		} else if (config_input_match(ev, "decelerator")) {
 			warpd_debug("Action matched: decelerator (%s)", ev->pressed ? "PRESS" : "RELEASE");
 			if (ev->pressed)
@@ -361,6 +380,8 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 	}
 
 exit:
+	scroll_stop();
+	scroll_set_fast(0);
 	if (dragging && ev && config_input_match(ev, "exit")) {
 		platform->mouse_up(config_get_int("drag_button"));
 		dragging = 0;

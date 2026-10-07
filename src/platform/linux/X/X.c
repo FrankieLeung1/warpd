@@ -97,6 +97,7 @@ static void set_opacity(Display *dpy, Window w, uint8_t _opacity)
 
 void x_copy_selection()
 {
+	warpd_debug("X11 emit: copy_selection (running XTestFakeKeyEvent Ctrl+Insert and xclip)");
 	XTestFakeKeyEvent(dpy, XKeysymToKeycode(dpy, XK_Control_L), True,
 			  CurrentTime);
 	XTestFakeKeyEvent(dpy, XKeysymToKeycode(dpy, XK_Insert), True,

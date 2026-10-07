@@ -33,6 +33,47 @@ static float a = 0;
 static int direction = 0;
 static double traveled_accum = 0; /* fractional scroll clicks accumulated */
 static int active_scrolling = 0;
+static int is_fast = 0;
+
+static float get_speed_factor()
+{
+	int cfg = config_get_int("scroll_speed_factor");
+	if (cfg <= 0)
+		return 3.0f;
+	if (cfg <= 10)
+		return (float)cfg;
+	return (float)cfg / 100.0f;
+}
+
+void scroll_set_fast(int fast)
+{
+	if (is_fast == (fast ? 1 : 0))
+		return;
+
+	is_fast = fast ? 1 : 0;
+	float mult = get_speed_factor();
+
+	if (is_fast) {
+		warpd_debug("Scroll fast mode enabled (factor=%.2f)", mult);
+		if (v > 0)
+			v *= mult;
+		if (a > 0)
+			a = a0 * mult;
+		else if (a < 0)
+			a = da0 * mult;
+	} else {
+		warpd_debug("Scroll fast mode disabled");
+		if (v > 0) {
+			v /= mult;
+			if (v > vt)
+				v = vt;
+		}
+		if (a > 0)
+			a = a0;
+		else if (a < 0)
+			a = da0;
+	}
+}
 
 static const char *direction_str(int dir)
 {
@@ -74,8 +115,10 @@ void scroll_tick()
 		return;
 	}
 
-	if (v >= vt) {
-		v = vt;
+	float mult = is_fast ? get_speed_factor() : 1.0f;
+	float cur_vt = vt * mult;
+	if (v >= cur_vt) {
+		v = cur_vt;
 		a = 0;
 	}
 
@@ -140,28 +183,41 @@ void scroll_stop()
 
 void scroll_decelerate()
 {
-	warpd_debug("Scroll decelerate called: da0=%.2f (current v=%.2f)", da0, v);
-	a = da0;
+	float mult = is_fast ? get_speed_factor() : 1.0f;
+	warpd_debug("Scroll decelerate called: da0=%.2f (current v=%.2f, is_fast=%d)", da0 * mult, v, is_fast);
+	a = da0 * mult;
 }
 
 void scroll_accelerate(int _direction)
 {
 	direction = _direction;
-	a = a0;
-	warpd_debug("Scroll accelerate called: direction=%s, initial_v=%.2f, a0=%.2f", direction_str(_direction), v0, a0);
+	float mult = is_fast ? get_speed_factor() : 1.0f;
+	a = a0 * mult;
+	warpd_debug("Scroll accelerate called: direction=%s, is_fast=%d, initial_v=%.2f, a0=%.2f",
+		direction_str(_direction), is_fast, v0 * mult, a);
 
 	if (v == 0) {
-		v = v0;
+		v = v0 * mult;
 		last_tick_us = get_time_us();
 		last_scroll_us = last_tick_us;
-		traveled_accum = 1.0;
-		active_scrolling = 1;
+		traveled_accum = 0;
+		active_scrolling = 0;
 
 		if (platform->input_suspend_keyboard)
 			platform->input_suspend_keyboard();
 
-		warpd_debug("Scroll first tap emitted: direction=%s, v=%.2f", direction_str(direction), v);
-		platform->scroll(direction);
+		if (!platform->scroll_continuous) {
+			/* In discrete mode, emit the initial single click on key press */
+			int initial_clicks = (int)mult;
+			if (initial_clicks < 1)
+				initial_clicks = 1;
+			for (int i = 0; i < initial_clicks; i++) {
+				traveled_accum += 1.0;
+				active_scrolling = 1;
+				warpd_debug("Scroll first tap emitted (discrete): direction=%s, v=%.2f", direction_str(direction), v);
+				platform->scroll(direction);
+			}
+		}
 	}
 }
 
