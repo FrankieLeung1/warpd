@@ -455,11 +455,13 @@ void way_scroll_continuous(int direction, double clicks)
 			warpd_debug("Wayland emit: scroll stop on axis 0 (vertical)");
 			zwlr_virtual_pointer_v1_axis_source(wl.ptr, WL_POINTER_AXIS_SOURCE_CONTINUOUS);
 			zwlr_virtual_pointer_v1_axis_stop(wl.ptr, t, 0);
+			zwlr_virtual_pointer_v1_axis_source(wl.ptr, WL_POINTER_AXIS_SOURCE_CONTINUOUS);
 		}
 		if (active_scroll_axes & 2) {
 			warpd_debug("Wayland emit: scroll stop on axis 1 (horizontal)");
 			zwlr_virtual_pointer_v1_axis_source(wl.ptr, WL_POINTER_AXIS_SOURCE_CONTINUOUS);
 			zwlr_virtual_pointer_v1_axis_stop(wl.ptr, t, 1);
+			zwlr_virtual_pointer_v1_axis_source(wl.ptr, WL_POINTER_AXIS_SOURCE_CONTINUOUS);
 		}
 		active_scroll_axes = 0;
 		zwlr_virtual_pointer_v1_frame(wl.ptr);
@@ -496,6 +498,7 @@ void way_scroll_continuous(int direction, double clicks)
 		direction, axis, clicks, delta);
 	zwlr_virtual_pointer_v1_axis_source(wl.ptr, WL_POINTER_AXIS_SOURCE_CONTINUOUS);
 	zwlr_virtual_pointer_v1_axis(wl.ptr, t, axis, (wl_fixed_t)(delta * 256.0 + (delta >= 0 ? 0.5 : -0.5)));
+	zwlr_virtual_pointer_v1_axis_source(wl.ptr, WL_POINTER_AXIS_SOURCE_CONTINUOUS);
 	zwlr_virtual_pointer_v1_frame(wl.ptr);
 
 	wl_display_flush(wl.dpy);
