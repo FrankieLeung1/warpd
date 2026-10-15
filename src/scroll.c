@@ -223,3 +223,5 @@ void scroll_accelerate(int _direction)
 
 void scroll_impart_impulse() { v += fling_velocity; }
 
+int scroll_is_active() { return v > 0 || active_scrolling; }
+

@@ -130,6 +130,7 @@ static struct {
 
 	{ "normal_system_cursor", "0", "If set to non-zero, use the system cursor instead of warpd's internal one.", OPT_INT },
 	{ "normal_blink_interval", "0", "If set to non-zero, the blink interval of the normal mode cursor in miliseconds. If two values are supplied, the first corresponds to the time the cursor is visible, and the second corresponds to the amount of time it is invisible", OPT_STRING },
+	{ "normal_timeout", "5000", "The inactivity timeout in milliseconds after which normal mode will exit (0 to disable).", OPT_INT },
 };
 
 const char *config_get(const char *key)

@@ -125,6 +125,7 @@ void scroll_stop();
 void scroll_accelerate(int direction);
 void scroll_decelerate();
 void scroll_set_fast(int fast);
+int scroll_is_active();
 
 void hist_add(int x, int y);
 int hist_get(int *x, int *y);

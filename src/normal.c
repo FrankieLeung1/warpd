@@ -130,6 +130,9 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 	if (tick_interval <= 0)
 		tick_interval = 2;
 
+	const int normal_timeout = config_get_int("normal_timeout");
+	uint64_t last_activity_us = get_time_us();
+
 	uint64_t time = 0;
 	uint64_t last_blink_update = 0;
 	while (1) {
@@ -157,7 +160,9 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 			start_ev = NULL;
 		}
 
+		now = get_time_us();
 		if (ev) {
+			last_activity_us = now;
 			warpd_debug("Normal mode key: %s %s (code=%u, mods=0x%x)",
 				ev->pressed ? "PRESS" : "RELEASE",
 				input_event_tostr(ev), ev->code, ev->mods);
@@ -193,7 +198,18 @@ struct input_event *normal_mode(struct input_event *start_ev, int oneshot)
 		}
 
 		scroll_tick();
-		if (mouse_process_key(ev, "up", "down", "left", "right")) {
+		int mouse_moved = mouse_process_key(ev, "up", "down", "left", "right");
+		if (mouse_moved || scroll_is_active())
+			last_activity_us = now;
+
+		if (normal_timeout > 0 &&
+		    (now - last_activity_us) >= (uint64_t)normal_timeout * 1000) {
+			warpd_debug("Normal mode timeout expired (%d ms), exiting", normal_timeout);
+			ev = NULL;
+			goto exit;
+		}
+
+		if (mouse_moved) {
 			redraw(scr, mx, my, !show_cursor);
 			continue;
 		}
