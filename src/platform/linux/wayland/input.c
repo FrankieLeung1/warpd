@@ -83,11 +83,20 @@ struct evdev_event {
 #define EVIOCGBIT(ev, len) _IOC(_IOC_READ, 'E', 0x20 + (ev), (len))
 #define EVIOCGKEY(len) _IOC(_IOC_READ, 'E', 0x18, (len))
 #define EVIOCGNAME(len) _IOC(_IOC_READ, 'E', 0x06, (len))
+#define EVIOCGPROP(len) _IOC(_IOC_READ, 'E', 0x09, (len))
 
 #define EV_SYN 0x00
 #define SYN_REPORT 0x00
 #define EV_MAX 0x1f
 #define KEY_MAX 0x2ff
+
+#define BTN_LEFT     0x110
+#define BTN_JOYSTICK 0x120
+#define BTN_GAMEPAD  0x130
+#define BTN_TOUCH    0x14a
+
+#define INPUT_PROP_ACCELEROMETER 0x06
+#define INPUT_PROP_MAX           0x1f
 
 /* A few key codes for capability detection. */
 #define KEY_1 2
@@ -148,6 +157,8 @@ static int keyboards_grabbed = 0;
 
 static int mouse_fds[MAX_MICE];
 static char mouse_names[MAX_MICE][64];
+static int mouse_last_abs_x[MAX_MICE];
+static int mouse_last_abs_y[MAX_MICE];
 static int nr_mice = 0;
 
 static int input_inotify_fd = -1;
@@ -358,10 +369,18 @@ int way_input_get_inotify_fd()
 	return input_inotify_fd;
 }
 
+static inline int test_bit(const unsigned long *arr, int bit)
+{
+	return (arr[bit / (8 * sizeof(long))] & (1UL << (bit % (8 * sizeof(long))))) != 0;
+}
+
 static int is_mouse(int fd)
 {
 	unsigned long evbit[(EV_MAX / (8 * sizeof(long)) + 1)];
 	unsigned long relbit[(REL_MAX / (8 * sizeof(long)) + 1)];
+	unsigned long absbit[(ABS_MAX / (8 * sizeof(long)) + 1)];
+	unsigned long keybit[(KEY_MAX / (8 * sizeof(long)) + 1)];
+	unsigned long propbit[(INPUT_PROP_MAX / (8 * sizeof(long)) + 1)];
 	char dev_name[256] = "Unknown";
 
 	ioctl(fd, EVIOCGNAME(sizeof dev_name), dev_name);
@@ -370,18 +389,41 @@ static int is_mouse(int fd)
 
 	memset(evbit, 0, sizeof evbit);
 	memset(relbit, 0, sizeof relbit);
+	memset(absbit, 0, sizeof absbit);
+	memset(keybit, 0, sizeof keybit);
+	memset(propbit, 0, sizeof propbit);
 
 	if (ioctl(fd, EVIOCGBIT(0, sizeof evbit), evbit) < 0)
 		return 0;
 
-	if (!(evbit[0] & (1UL << EV_REL)))
-		return 0;
+	if (ioctl(fd, EVIOCGPROP(sizeof propbit), propbit) >= 0) {
+		if (test_bit(propbit, INPUT_PROP_ACCELEROMETER))
+			return 0;
+	}
 
-	if (ioctl(fd, EVIOCGBIT(EV_REL, sizeof relbit), relbit) < 0)
-		return 0;
+	if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof keybit), keybit) >= 0) {
+		if (test_bit(keybit, BTN_GAMEPAD) || test_bit(keybit, BTN_JOYSTICK))
+			return 0;
+	}
 
-	return (relbit[REL_X / (8 * sizeof(long))] & (1UL << (REL_X % (8 * sizeof(long))))) &&
-	       (relbit[REL_Y / (8 * sizeof(long))] & (1UL << (REL_Y % (8 * sizeof(long)))));
+	if (test_bit(evbit, EV_REL)) {
+		if (ioctl(fd, EVIOCGBIT(EV_REL, sizeof relbit), relbit) >= 0) {
+			if (test_bit(relbit, REL_X) && test_bit(relbit, REL_Y))
+				return 1;
+		}
+	}
+
+	if (test_bit(evbit, EV_ABS)) {
+		if (ioctl(fd, EVIOCGBIT(EV_ABS, sizeof absbit), absbit) >= 0) {
+			if (test_bit(absbit, ABS_X) && test_bit(absbit, ABS_Y)) {
+				/* For absolute pointers, require pointer button capability (BTN_LEFT or BTN_TOUCH) */
+				if (test_bit(keybit, BTN_LEFT) || test_bit(keybit, BTN_TOUCH))
+					return 1;
+			}
+		}
+	}
+
+	return 0;
 }
 
 static int is_keyboard(int fd)
@@ -682,6 +724,8 @@ static void handle_device_added(const char *dev_name)
 			}
 			if (!exists) {
 				snprintf(mouse_names[nr_mice], sizeof mouse_names[nr_mice], "%s", dev_name);
+				mouse_last_abs_x[nr_mice] = -1;
+				mouse_last_abs_y[nr_mice] = -1;
 				mouse_fds[nr_mice++] = fd;
 				return;
 			}
@@ -719,6 +763,8 @@ static void handle_device_removed(const char *dev_name)
 			for (int j = i; j < nr_mice - 1; j++) {
 				mouse_fds[j] = mouse_fds[j + 1];
 				memcpy(mouse_names[j], mouse_names[j + 1], sizeof mouse_names[j]);
+				mouse_last_abs_x[j] = mouse_last_abs_x[j + 1];
+				mouse_last_abs_y[j] = mouse_last_abs_y[j + 1];
 			}
 			nr_mice--;
 			break;
@@ -1085,6 +1131,8 @@ void way_input_open_mice()
 		if (j != i) {
 			mouse_fds[j] = mouse_fds[i];
 			memcpy(mouse_names[j], mouse_names[i], sizeof mouse_names[j]);
+			mouse_last_abs_x[j] = mouse_last_abs_x[i];
+			mouse_last_abs_y[j] = mouse_last_abs_y[i];
 		}
 		j++;
 	}
@@ -1124,6 +1172,8 @@ void way_input_open_mice()
 		ioctl(fd, EVIOCGNAME(sizeof mname), mname);
 		strncpy(mouse_names[nr_mice], ent->d_name, sizeof(mouse_names[nr_mice]) - 1);
 		mouse_names[nr_mice][sizeof(mouse_names[nr_mice]) - 1] = '\0';
+		mouse_last_abs_x[nr_mice] = -1;
+		mouse_last_abs_y[nr_mice] = -1;
 		mouse_fds[nr_mice++] = fd;
 		fprintf(stderr, "[warpd] Device added: mouse %s (/dev/input/%s, fd %d)\n",
 			mname[0] ? mname : "Unknown", ent->d_name, fd);
@@ -1175,6 +1225,8 @@ int way_input_poll_mice(int timeout)
 			for (int k = i; k < nr_mice - 1; k++) {
 				mouse_fds[k] = mouse_fds[k + 1];
 				memcpy(mouse_names[k], mouse_names[k + 1], sizeof mouse_names[k]);
+				mouse_last_abs_x[k] = mouse_last_abs_x[k + 1];
+				mouse_last_abs_y[k] = mouse_last_abs_y[k + 1];
 			}
 			nr_mice--;
 			continue;
@@ -1185,8 +1237,22 @@ int way_input_poll_mice(int timeout)
 			ssize_t n;
 			int disconnected = 0;
 			while ((n = read(mouse_fds[i], &raw, sizeof raw)) == (ssize_t)sizeof raw) {
-				if (raw.type == EV_REL &&
-				    (raw.code == REL_X || raw.code == REL_Y)) {
+				int moved = 0;
+				if (raw.type == EV_REL && (raw.code == REL_X || raw.code == REL_Y)) {
+					moved = 1;
+				} else if (raw.type == EV_ABS) {
+					if (raw.code == ABS_X) {
+						if (mouse_last_abs_x[i] != -1 && mouse_last_abs_x[i] != raw.value)
+							moved = 1;
+						mouse_last_abs_x[i] = raw.value;
+					} else if (raw.code == ABS_Y) {
+						if (mouse_last_abs_y[i] != -1 && mouse_last_abs_y[i] != raw.value)
+							moved = 1;
+						mouse_last_abs_y[i] = raw.value;
+					}
+				}
+
+				if (moved) {
 					mouse_moved = 1;
 					uint64_t now = get_time_ms();
 					if (mouse_fds[i] != last_active_mouse_fd || (now - last_hw_mouse_time > 1500)) {
@@ -1213,6 +1279,8 @@ int way_input_poll_mice(int timeout)
 				for (int k = i; k < nr_mice - 1; k++) {
 					mouse_fds[k] = mouse_fds[k + 1];
 					memcpy(mouse_names[k], mouse_names[k + 1], sizeof mouse_names[k]);
+					mouse_last_abs_x[k] = mouse_last_abs_x[k + 1];
+					mouse_last_abs_y[k] = mouse_last_abs_y[k + 1];
 				}
 				nr_mice--;
 				continue;
