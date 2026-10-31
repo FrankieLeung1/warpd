@@ -409,10 +409,13 @@ static int hyprland_active_window_right_edge(int *gx, int *gy)
 	return 0;
 }
 
+static int cursor_is_hidden = 0;
+
 void way_mouse_show()
 {
 	if (!is_hyprland)
 		return;
+	cursor_is_hidden = 0;
 	if (hypr_use_lua)
 		hyprland_ipc("/eval hl.config({ cursor = { invisible = false } })");
 	else
@@ -425,6 +428,7 @@ void way_mouse_hide()
 		fprintf(stderr, "wayland: mouse hiding not implemented\n");
 		return;
 	}
+	cursor_is_hidden = 1;
 	if (hypr_use_lua)
 		hyprland_ipc("/eval hl.config({ cursor = { invisible = true } })");
 	else
@@ -644,21 +648,24 @@ struct input_event *way_input_wait(struct input_event *events, const char *names
 		 * Restore and show the cursor when the user moves
 		 * their mouse.
 		 */
-		if (saved_scr) {
+		int need_mouse_monitor = (saved_scr != NULL) || cursor_is_hidden;
+		if (need_mouse_monitor) {
 			if (way_input_poll_mice(0)) {
 				fprintf(stderr, "[warpd] Hardware cursor movement detected: restoring visible cursor\n");
-				way_mouse_move(saved_scr, saved_x, saved_y);
+				if (saved_scr)
+					way_mouse_move(saved_scr, saved_x, saved_y);
 				way_mouse_show();
 				saved_scr = NULL;
+				need_mouse_monitor = 0;
 			}
 		}
 
 		/*
-		 * If the cursor was hidden (saved_scr set), include
-		 * mouse fds in poll so physical movement wakes us
-		 * immediately regardless of the timeout.
+		 * If the cursor was hidden, include mouse fds in poll
+		 * so physical movement wakes us immediately regardless
+		 * of the timeout.
 		 */
-		if (saved_scr) {
+		if (need_mouse_monitor) {
 			nr_mouse_fds = way_input_get_mouse_fds(mouse_fds);
 			for (int i = 0; i < nr_mouse_fds; i++) {
 				pfds[nfds].fd = mouse_fds[i];
