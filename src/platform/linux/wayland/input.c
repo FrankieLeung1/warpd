@@ -384,10 +384,9 @@ static int is_mouse(int fd)
 	char dev_name[256] = "Unknown";
 
 	ioctl(fd, EVIOCGNAME(sizeof dev_name), dev_name);
-	/* Ignore virtual keyboards and known virtual input devices */
+	/* Ignore virtual keyboards */
 	if (strcasecmp(dev_name, "kanata") == 0 ||
-	    strcasecmp(dev_name, "kmonad") == 0 ||
-	    strncasecmp(dev_name, "OpenLogi", 8) == 0)
+	    strcasecmp(dev_name, "kmonad") == 0)
 		return 0;
 
 	memset(evbit, 0, sizeof evbit);
