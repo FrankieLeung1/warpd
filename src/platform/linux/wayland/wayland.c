@@ -302,24 +302,9 @@ static void hyprland_ipc_init(void)
 
 static int hyprland_ipc(const char *cmd)
 {
-	int fd, r;
+	char buf[128];
 
-	if (!hypr_addr.sun_path[0])
-		return -1;
-
-	fd = socket(AF_UNIX, SOCK_STREAM, 0);
-	if (fd < 0)
-		return -1;
-
-	if (connect(fd, (struct sockaddr *)&hypr_addr, hypr_addr_len) < 0) {
-		close(fd);
-		return -1;
-	}
-
-	r = write(fd, cmd, strlen(cmd));
-	shutdown(fd, SHUT_RDWR);
-	close(fd);
-	return r > 0 ? 0 : -1;
+	return hyprland_query(cmd, buf, sizeof buf) >= 0 ? 0 : -1;
 }
 
 void way_mouse_get_position(struct screen **scr, int *x, int *y)
