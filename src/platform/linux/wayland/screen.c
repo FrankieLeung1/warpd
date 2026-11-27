@@ -329,8 +329,21 @@ static void discover_screen_scale(struct screen *scr)
 
 	wl_surface_commit(tmp_surface);
 
-	while (scr->state == prev_state)
-		wl_display_dispatch(wl.dpy);
+	{
+		int wl_fd = wl_display_get_fd(wl.dpy);
+		int attempts = 0;
+
+		while (scr->state == prev_state && attempts < 10) {
+			struct pollfd pfd = { .fd = wl_fd, .events = POLLIN };
+
+			wl_display_flush(wl.dpy);
+			if (poll(&pfd, 1, 100) > 0)
+				wl_display_dispatch(wl.dpy);
+			else
+				wl_display_dispatch_pending(wl.dpy);
+			attempts++;
+		}
+	}
 
 	/*
 	 * scr->state is also incremented by xdg-output logical_position and
@@ -358,9 +371,27 @@ void initialize_screen(struct screen *scr)
 				    &zxdg_output_v1_listener, scr);
 
 	scr->state = 0;
-	do {
-		wl_display_dispatch(wl.dpy);
-	} while (scr->state != 2);
+	{
+		int wl_fd = wl_display_get_fd(wl.dpy);
+		int attempts = 0;
+
+		while (scr->state < 2 && attempts < 20) {
+			struct pollfd pfd = { .fd = wl_fd, .events = POLLIN };
+
+			wl_display_flush(wl.dpy);
+			if (poll(&pfd, 1, 100) > 0)
+				wl_display_dispatch(wl.dpy);
+			else
+				wl_display_dispatch_pending(wl.dpy);
+			attempts++;
+		}
+	}
+
+	if (scr->w <= 0 || scr->h <= 0) {
+		fprintf(stderr, "WARNING: Timed out waiting for xdg_output geometry for output %u\n",
+			scr->wl_output_name);
+		return;
+	}
 
 	discover_screen_scale(scr);
 
